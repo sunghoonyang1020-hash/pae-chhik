@@ -50,8 +50,20 @@
 const { useState, useEffect, useMemo } = React;
 
 // ========== Supabase 연결 ==========
-const HAS_SUPABASE = window.SUPABASE_URL && !window.SUPABASE_URL.includes('여기에');
+const HAS_SUPABASE = window.SUPABASE_URL 
+  && window.SUPABASE_URL.startsWith('https://')
+  && window.SUPABASE_ANON_KEY 
+  && window.SUPABASE_ANON_KEY.length > 50;
+
 const sb = HAS_SUPABASE ? supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY) : null;
+
+// 디버그: 전역에서 확인 가능
+window.__DEBUG = { HAS_SUPABASE, sb, lastError: null };
+console.log('[패찍이] Supabase 연결:', HAS_SUPABASE ? '✅ OK' : '❌ FAIL');
+if (!HAS_SUPABASE) {
+  console.log('[패찍이] URL:', window.SUPABASE_URL);
+  console.log('[패찍이] KEY length:', window.SUPABASE_ANON_KEY?.length);
+}
 
 // ========== 아이콘 (간단한 SVG) ==========
 const Icon = ({ d, className = "w-4 h-4" }) => (
@@ -215,11 +227,25 @@ function App() {
           sb.from('task_checks').select('*'),
           sb.from('user_config').select('*').eq('id',1).maybeSingle(),
         ]);
+        
+        if (cR.error) throw cR.error;
+        
+        let coursesFromDb;
         if (cR.data && cR.data.length > 0) {
-          const cs = cR.data.map(fromDb);
-          setCourses(cs);
-          LS.set('courses', cs);
+          // 이미 DB에 있으면 그거 사용
+          coursesFromDb = cR.data.map(fromDb);
+        } else {
+          // DB가 비어있으면 기본 강좌들을 DB에 시드
+          console.log('[패찍이] courses 테이블이 비어있음. 기본 강좌 업로드 중...');
+          const toInsert = DEFAULT_COURSES.map(c => toDb(c));
+          const { data: inserted, error: insErr } = await sb.from('courses').insert(toInsert).select();
+          if (insErr) throw insErr;
+          coursesFromDb = inserted.map(fromDb);
+          console.log('[패찍이] 기본 강좌', coursesFromDb.length, '개 업로드 완료');
         }
+        setCourses(coursesFromDb);
+        LS.set('courses', coursesFromDb);
+        
         if (chR.data) {
           const m = {};
           for (const r of chR.data) m[`${r.course_id}:${r.task_date}`] = r.achieved;
@@ -232,8 +258,10 @@ function App() {
           LS.set('config', cfg);
         }
         setSyncStatus('ok');
+        console.log('[패찍이] 초기화 완료');
       } catch (e) {
-        console.warn('동기화 실패, 로컬 사용:', e);
+        console.error('[패찍이] 동기화 실패:', e);
+        window.__DEBUG.lastError = e;
         setSyncStatus('err');
       }
     })();
@@ -243,9 +271,26 @@ function App() {
   const saveCheckDb = async (cid, td, v) => {
     if (!sb || cid === 'exam' || td === 'today-init') return;
     try {
-      if (v <= 0) await sb.from('task_checks').delete().eq('course_id',cid).eq('task_date',td);
-      else await sb.from('task_checks').upsert({ course_id:cid, task_date:td, achieved:v, updated_at:new Date().toISOString() });
-    } catch (e) { console.warn(e); }
+      let result;
+      if (v <= 0) {
+        result = await sb.from('task_checks').delete().eq('course_id',cid).eq('task_date',td);
+      } else {
+        result = await sb.from('task_checks').upsert({ 
+          course_id:cid, task_date:td, achieved:v, updated_at:new Date().toISOString() 
+        });
+      }
+      if (result.error) {
+        console.error('[패찍이] 저장 실패:', result.error);
+        window.__DEBUG.lastError = result.error;
+        alert('저장 실패: ' + result.error.message);
+      } else {
+        console.log('[패찍이] 저장 성공:', cid, td, v);
+      }
+    } catch (e) { 
+      console.error('[패찍이] 저장 예외:', e);
+      window.__DEBUG.lastError = e;
+      alert('저장 오류: ' + e.message);
+    }
   };
   const updChecked = (next) => { setChecked(next); LS.set('checked', next); };
 
