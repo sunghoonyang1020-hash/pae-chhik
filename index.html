@@ -41,8 +41,8 @@
      Supabase 설정 - 여기 두 줄만 수정하면 돼!
      ============================================ -->
 <script>
-  window.SUPABASE_URL = "https://ipjoxlkrfwjvyorerjhf.supabase.co";
-  window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwam94bGtyZndqdnlvcmVyamhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDA3MjUsImV4cCI6MjA5MjE3NjcyNX0.fdkM6gWCSZw5oO6JiesNnY9jDqRBGDJ9r2joUR0OJqM";
+  window.SUPABASE_URL = "여기에_SUPABASE_URL_붙여넣기";
+  window.SUPABASE_ANON_KEY = "여기에_ANON_KEY_붙여넣기";
 </script>
 
 <!-- 메인 앱 (JSX로 작성, Babel이 브라우저에서 변환) -->
@@ -201,12 +201,14 @@ function cStats(c, holidays, cfg, today) {
 
 // ========== 메인 앱 ==========
 function App() {
-  const [courses, setCourses] = useState(() => LS.get('courses', DEFAULT_COURSES));
-  const [checked, setChecked] = useState(() => LS.get('checked', {}));
-  const [config, setConfig] = useState(() => LS.get('config', DEFAULT_CONFIG));
+  // Supabase 연결되어 있으면 localStorage 무시 (가짜 id 방지)
+  // 로컬 모드일 때만 LS 사용
+  const [courses, setCourses] = useState(() => HAS_SUPABASE ? [] : LS.get('courses', DEFAULT_COURSES));
+  const [checked, setChecked] = useState(() => HAS_SUPABASE ? {} : LS.get('checked', {}));
+  const [config, setConfig] = useState(() => HAS_SUPABASE ? DEFAULT_CONFIG : LS.get('config', DEFAULT_CONFIG));
   const [today, setToday] = useState(() => {
     const real = fd(new Date());
-    const cfg = LS.get('config', DEFAULT_CONFIG);
+    const cfg = HAS_SUPABASE ? DEFAULT_CONFIG : LS.get('config', DEFAULT_CONFIG);
     return (real >= cfg.startDate && real <= cfg.endDate) ? real : cfg.startDate;
   });
   const [anchor, setAnchor] = useState(today);
@@ -267,9 +269,19 @@ function App() {
     })();
   }, []);
 
+  // UUID 형식 체크 헬퍼
+  const isUUID = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
   // ===== 체크 =====
   const saveCheckDb = async (cid, td, v) => {
-    if (!sb || cid === 'exam' || td === 'today-init') return;
+    if (!sb) { console.log('[패찍이] Supabase 없음 - 로컬만'); return; }
+    if (cid === 'exam' || td === 'today-init') { console.log('[패찍이] 특수 태스크, 스킵'); return; }
+    if (!isUUID(cid)) { 
+      console.error('[패찍이] ⚠️ course_id가 UUID 아님:', cid); 
+      alert('⚠️ course_id가 UUID가 아님: ' + cid + '\n\n브라우저 데이터 삭제 후 다시 시도해.');
+      return; 
+    }
+    console.log('[패찍이] 저장 시도:', { course_id: cid, task_date: td, achieved: v });
     try {
       let result;
       if (v <= 0) {
@@ -280,14 +292,14 @@ function App() {
         });
       }
       if (result.error) {
-        console.error('[패찍이] 저장 실패:', result.error);
+        console.error('[패찍이] ❌ 저장 실패:', result.error);
         window.__DEBUG.lastError = result.error;
         alert('저장 실패: ' + result.error.message);
       } else {
-        console.log('[패찍이] 저장 성공:', cid, td, v);
+        console.log('[패찍이] ✅ 저장 성공');
       }
     } catch (e) { 
-      console.error('[패찍이] 저장 예외:', e);
+      console.error('[패찍이] ❌ 예외:', e);
       window.__DEBUG.lastError = e;
       alert('저장 오류: ' + e.message);
     }
