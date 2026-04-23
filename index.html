@@ -20,61 +20,7 @@
     background: #fafaf9;
   }
   .tabular-nums { font-variant-numeric: tabular-nums; }
-  
-  /* 부드러운 애니메이션 */
-  @keyframes pop {
-    0% { transform: scale(1); }
-    40% { transform: scale(1.25) rotate(-6deg); }
-    100% { transform: scale(1); }
-  }
-  .pop { animation: pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
-  
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .fade-in { animation: fadeIn 0.25s ease-out; }
-  
-  @keyframes slideUp {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
-  }
-  .slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-  
-  @keyframes countUp {
-    0% { transform: translateY(8px); opacity: 0; }
-    100% { transform: translateY(0); opacity: 1; }
-  }
-  .count-up { animation: countUp 0.3s ease-out; }
-  
-  /* 프로그레스바 부드럽게 */
-  .progress-bar {
-    transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-  
-  /* 카드 호버 효과 */
-  .card-hover {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }
-  .card-hover:active {
-    transform: scale(0.98);
-  }
-  
-  /* 체크박스 애니메이션 */
-  .check-btn {
-    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-  .check-btn:active {
-    transform: scale(0.9);
-  }
-  
-  /* 스크롤바 숨기기 */
   ::-webkit-scrollbar { display: none; }
-  
-  /* 탭 전환 부드럽게 */
-  .tab-btn {
-    transition: all 0.2s ease;
-  }
 </style>
 </head>
 <body>
@@ -85,8 +31,8 @@
      Supabase 설정 - 여기 두 줄만 수정하면 돼!
      ============================================ -->
 <script>
-  window.SUPABASE_URL = "https://ipjoxlkrfwjvyorerjhf.supabase.co";
-  window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwam94bGtyZndqdnlvcmVyamhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDA3MjUsImV4cCI6MjA5MjE3NjcyNX0.fdkM6gWCSZw5oO6JiesNnY9jDqRBGDJ9r2joUR0OJqM";
+  window.SUPABASE_URL = "여기에_SUPABASE_URL_붙여넣기";
+  window.SUPABASE_ANON_KEY = "여기에_ANON_KEY_붙여넣기";
 </script>
 
 <script type="text/babel" data-type="module">
@@ -109,6 +55,7 @@ const Icon = ({ d, className = "w-4 h-4" }) => (
 const Check = (p) => <Icon {...p} d={<polyline points="20 6 9 17 4 12" />} />;
 const ChevronLeft = (p) => <Icon {...p} d={<polyline points="15 18 9 12 15 6" />} />;
 const ChevronRight = (p) => <Icon {...p} d={<polyline points="9 18 15 12 9 6" />} />;
+const ChevronDown = (p) => <Icon {...p} d={<polyline points="6 9 12 15 18 9" />} />;
 const Plus = (p) => <Icon {...p} d={<><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>} />;
 const Minus = (p) => <Icon {...p} d={<line x1="5" y1="12" x2="19" y2="12" />} />;
 const X = (p) => <Icon {...p} d={<><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>} />;
@@ -168,11 +115,12 @@ const DEFAULT_COURSES = [
   { name:'학원', subject:'학원', type:'quota', dailyAmount:2, unit:'h', days:[1,5], nonCarryable:true, note:'정보성 표시 (이월 X)', sortOrder:11 },
 ];
 
-// ========== DB ↔ JS 변환 ==========
 const fromDb = (r) => ({ id:r.id, name:r.name, subject:r.subject, type:r.type, totalLessons:r.total_lessons, doneLessons:r.done_lessons, dailyAmount:r.daily_amount, unit:r.unit||'개', targetDate:r.target_date, days:r.days||[], postCompleteText:r.post_complete_text, note:r.note, nonCarryable:r.non_carryable, sortOrder:r.sort_order });
 const toDb = (c) => ({ name:c.name, subject:c.subject, type:c.type, total_lessons:c.totalLessons??null, done_lessons:c.doneLessons??0, daily_amount:c.dailyAmount??null, unit:c.unit, target_date:c.targetDate??null, days:c.days, post_complete_text:c.postCompleteText??null, note:c.note??null, non_carryable:c.nonCarryable??false, sort_order:c.sortOrder??0 });
 
 // ========== 스케줄 빌더 ==========
+// 핵심 수정: "오늘 분량" 가상 태스크 제거
+// → 강좌의 days가 startDate 요일을 포함 안 해도 첫날에 강좌의 진도를 1회 배치
 function buildSchedule(courses, holidays, config) {
   const s = {};
   const all = daysBtw(config.startDate, config.endDate);
@@ -181,6 +129,7 @@ function buildSchedule(courses, holidays, config) {
     s[ds] = { wd:dowN(ds), special: isH?'🏖️ 휴일 · 전면 휴식':null, tasks:[], isHoliday:isH };
   }
   const sorted = [...courses].sort((a,b) => (a.sortOrder??99)-(b.sortOrder??99));
+  
   for (const c of sorted) {
     let p = c.doneLessons || 0;
     for (const ds of all) {
@@ -200,15 +149,14 @@ function buildSchedule(courses, holidays, config) {
       s[ds].tasks.push({ id:tid, courseId:c.id, subject:c.subject, text, note:c.note, unit:c.unit, target, type:c.type, carryable:!c.nonCarryable });
     }
   }
+  
+  // 첫날 표시
   const first = config.startDate;
-  if (s[first]) {
-    for (const c of sorted) {
-      if (c.type !== 'lesson' || !c.doneLessons || c.doneLessons <= 0) continue;
-      if (s[first].tasks.some(t => t.courseId === c.id)) continue;
-      s[first].tasks.unshift({ id:`${c.id}:today-init`, courseId:c.id, subject:c.subject, text:`${c.name} ${c.doneLessons}${c.unit} (오늘 분량)`, note:'첫날 — 현재 진도', target:1, type:'lesson', carryable:!c.nonCarryable, unit:c.unit });
-    }
-    if (s[first].tasks.length > 0 && !s[first].special) s[first].special = '🎯 오늘 반드시';
+  if (s[first] && s[first].tasks.length > 0 && !s[first].special) {
+    s[first].special = '🎯 시작일';
   }
+  
+  // 시험일
   if (s[config.endDate]) {
     s[config.endDate].special = `🚀 ${config.examName} D-DAY`;
     s[config.endDate].isExam = true;
@@ -244,13 +192,12 @@ function App() {
   const [view, setView] = useState('calendar');
   const [editing, setEditing] = useState(null);
   const [quickEdit, setQuickEdit] = useState(null);
-  const [justChecked, setJustChecked] = useState(null);
+  const [expandedPast, setExpandedPast] = useState(false); // 지난 날짜 펼치기
 
   // 초기 로드
   useEffect(() => {
     (async () => {
       if (!sb) {
-        // 로컬 모드
         setCourses(DEFAULT_COURSES.map((c, i) => ({ ...c, id: `local-${i}` })));
         const real = fd(new Date());
         if (real >= DEFAULT_CONFIG.startDate && real <= DEFAULT_CONFIG.endDate) {
@@ -262,8 +209,6 @@ function App() {
       
       try {
         setSyncStatus('syncing');
-        
-        // 1. courses 먼저 (또는 시드)
         const cR = await sb.from('courses').select('*').order('sort_order');
         if (cR.error) throw cR.error;
         
@@ -276,7 +221,6 @@ function App() {
           coursesFromDb = data.map(fromDb);
         }
         
-        // 2. config + checks 동시 로드
         const [cfR, chR] = await Promise.all([
           sb.from('user_config').select('*').eq('id', 1).maybeSingle(),
           sb.from('task_checks').select('*'),
@@ -284,7 +228,6 @@ function App() {
         if (cfR.error) throw cfR.error;
         if (chR.error) throw chR.error;
         
-        // 3. 순차적으로 setState
         if (cfR.data) {
           const cfg = {
             examName: cfR.data.exam_name,
@@ -320,9 +263,8 @@ function App() {
     })();
   }, []);
 
-  // ===== 체크 =====
   const saveCheckDb = useCallback(async (cid, td, v) => {
-    if (!sb || cid === 'exam' || td === 'today-init' || !isUUID(cid)) return;
+    if (!sb || cid === 'exam' || !isUUID(cid)) return;
     try {
       if (v <= 0) {
         await sb.from('task_checks').delete().eq('course_id', cid).eq('task_date', td);
@@ -338,15 +280,10 @@ function App() {
   const toggleFull = (t) => {
     const [cid, td] = t.id.split(':');
     if (cid === 'exam') return;
-    
     setChecked(prev => {
       const cur = prev[t.id] || 0;
       const nv = cur >= t.target ? 0 : t.target;
       saveCheckDb(cid, td, nv);
-      if (cur < t.target) {
-        setJustChecked(t.id);
-        setTimeout(() => setJustChecked(null), 500);
-      }
       return { ...prev, [t.id]: nv };
     });
   };
@@ -354,7 +291,6 @@ function App() {
   const adjust = (t, delta) => {
     const [cid, td] = t.id.split(':');
     if (cid === 'exam') return;
-    
     setChecked(prev => {
       const cur = prev[t.id] || 0;
       const v = Math.max(0, cur + delta);
@@ -376,7 +312,6 @@ function App() {
     if (sb) { try { await sb.from('task_checks').delete().not('course_id','is',null); } catch(e){} }
   };
 
-  // ===== 강좌 CRUD =====
   const saveCourse = async (form) => {
     try {
       if (form.isNew) {
@@ -426,7 +361,6 @@ function App() {
     if (sb) { try { await sb.from('user_config').update({ exam_name:c.examName, start_date:c.startDate, end_date:c.endDate, holidays:c.holidays }).eq('id',1); } catch(e){} }
   };
 
-  // ===== 계산 =====
   const schedule = useMemo(() => buildSchedule(courses, config.holidays, config), [courses, config]);
   const allDates = useMemo(() => Object.keys(schedule).sort(), [schedule]);
   const wd = useMemo(() => weekDates(anchor), [anchor]);
@@ -465,11 +399,15 @@ function App() {
   const dL = dDay(today, config.endDate);
   const [ws, we] = [wd[0], wd[6]];
 
+  // 이번 주에서 "지난 날짜" 와 "오늘 이후" 분리
+  const pastDates = wd.filter(ds => pd(ds) < pd(today));
+  const currentDates = wd.filter(ds => pd(ds) >= pd(today));
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-stone-50">
         <div className="text-center">
-          <div className="text-4xl mb-3 animate-pulse">📚</div>
+          <div className="text-4xl mb-3">📚</div>
           <div className="text-sm text-stone-500 font-semibold">로딩중...</div>
         </div>
       </div>
@@ -478,8 +416,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-800">
-      {/* 헤더 */}
-      <header className="bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 text-stone-100 sticky top-0 z-20 shadow-xl">
+      <header className="bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 text-stone-100 sticky top-0 z-20 shadow-lg">
         <div className="max-w-3xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -490,30 +427,28 @@ function App() {
             </div>
             <div className="text-right">
               <div className="text-[10px] text-stone-400 uppercase tracking-widest">시험까지</div>
-              <div key={dL} className="text-2xl font-black text-rose-400 tabular-nums count-up">D-{dL}</div>
+              <div className="text-2xl font-black text-rose-400 tabular-nums">D-{dL}</div>
             </div>
           </div>
 
           <div className="mt-3">
             <div className="flex justify-between text-xs text-stone-400 mb-1">
               <span>전체 진도</span>
-              <span key={`${stats.done}-${stats.total}`} className="tabular-nums count-up">
-                {stats.done} / {stats.total} ({Math.round(stats.done/(stats.total||1)*100)}%)
-              </span>
+              <span className="tabular-nums">{stats.done} / {stats.total} ({Math.round(stats.done/(stats.total||1)*100)}%)</span>
             </div>
             <div className="h-2 bg-stone-700 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 progress-bar"
+              <div className="h-full bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400"
                 style={{ width: `${stats.total ? stats.done/stats.total*100 : 0}%` }} />
             </div>
           </div>
 
           <div className="mt-3 flex gap-1 p-1 bg-stone-700/50 rounded-lg">
             <button onClick={() => setView('calendar')}
-              className={`tab-btn flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-bold ${view==='calendar'?'bg-white text-stone-900 shadow-md':'text-stone-300'}`}>
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-bold ${view==='calendar'?'bg-white text-stone-900':'text-stone-300'}`}>
               <Cal className="w-3.5 h-3.5" />캘린더
             </button>
             <button onClick={() => setView('courses')}
-              className={`tab-btn flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-bold ${view==='courses'?'bg-white text-stone-900 shadow-md':'text-stone-300'}`}>
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-bold ${view==='courses'?'bg-white text-stone-900':'text-stone-300'}`}>
               <Book className="w-3.5 h-3.5" />강좌 관리 ({courses.length})
             </button>
           </div>
@@ -522,8 +457,7 @@ function App() {
 
       <main className="max-w-3xl mx-auto px-4 py-5 pb-24">
         {view === 'calendar' ? (
-          <div className="fade-in">
-            {/* 과목별 진도 */}
+          <>
             <section className="mb-5">
               <div className="flex items-center gap-2 mb-3">
                 <Trending className="w-4 h-4 text-stone-600" />
@@ -538,10 +472,10 @@ function App() {
                     <div key={sub} className={`${cfg.bg} ${cfg.bd} border rounded-xl p-3`}>
                       <div className="flex justify-between items-baseline mb-1.5">
                         <span className={`text-xs font-bold ${cfg.c}`}>{sub}</span>
-                        <span key={`${sub}-${st.done}`} className="text-[11px] text-stone-500 tabular-nums count-up">{st.done}/{st.total}</span>
+                        <span className="text-[11px] text-stone-500 tabular-nums">{st.done}/{st.total}</span>
                       </div>
                       <div className="h-1.5 bg-white/60 rounded-full overflow-hidden">
-                        <div className={`h-full ${cfg.br} progress-bar`} style={{width:`${pct}%`}} />
+                        <div className={`h-full ${cfg.br}`} style={{width:`${pct}%`}} />
                       </div>
                     </div>
                   );
@@ -549,106 +483,84 @@ function App() {
               </div>
             </section>
 
-            {/* 주 네비 */}
             <section className="mb-4">
               <div className="flex items-center justify-between gap-2 bg-white rounded-xl border border-stone-200 p-2 shadow-sm">
-                <button onClick={() => { const p = fd(addD(pd(ws),-1)); if (pd(p) >= pd(allDates[0])) setAnchor(p); }}
+                <button onClick={() => { const p = fd(addD(pd(ws),-1)); if (pd(p) >= pd(allDates[0])) { setAnchor(p); setExpandedPast(false); } }}
                   disabled={pd(ws) <= pd(allDates[0])}
-                  className="p-2 rounded-lg hover:bg-stone-100 active:bg-stone-200 disabled:opacity-30 transition-colors">
+                  className="p-2 rounded-lg hover:bg-stone-100 disabled:opacity-30">
                   <ChevronLeft className="w-5 h-5" />
                 </button>
                 <div className="flex-1 text-center">
                   <div className="text-[11px] text-stone-500">이번 주</div>
                   <div className="text-sm font-bold tabular-nums">{ws.slice(5).replace('-','/')} ~ {we.slice(5).replace('-','/')}</div>
                 </div>
-                <button onClick={() => setAnchor(today)}
-                  className="text-xs px-3 py-1.5 bg-stone-800 text-white rounded-lg font-semibold hover:bg-stone-700 active:scale-95 transition-all">오늘</button>
-                <button onClick={() => { const n = fd(addD(pd(we),1)); if (pd(n) <= pd(allDates[allDates.length-1])) setAnchor(n); }}
+                <button onClick={() => { setAnchor(today); setExpandedPast(false); }}
+                  className="text-xs px-3 py-1.5 bg-stone-800 text-white rounded-lg font-semibold hover:bg-stone-700">오늘</button>
+                <button onClick={() => { const n = fd(addD(pd(we),1)); if (pd(n) <= pd(allDates[allDates.length-1])) { setAnchor(n); setExpandedPast(false); } }}
                   disabled={pd(we) >= pd(allDates[allDates.length-1])}
-                  className="p-2 rounded-lg hover:bg-stone-100 active:bg-stone-200 disabled:opacity-30 transition-colors">
+                  className="p-2 rounded-lg hover:bg-stone-100 disabled:opacity-30">
                   <ChevronRight className="w-5 h-5" />
                 </button>
               </div>
             </section>
 
-            {/* 요일 카드 */}
-            <section className="space-y-3">
-              {wd.map((ds) => {
-                const d = schedule[ds];
-                if (!d) return null;
-                const isT = ds === today;
-                const isF = pd(ds) > pd(today);
-                const isW = d.wd === '토' || d.wd === '일';
-                const isE = d.isExam;
-                const dt = d.tasks.reduce((s,t)=>s+t.target,0);
-                const dd = d.tasks.reduce((s,t)=>s+Math.min(checked[t.id]||0,t.target),0);
-                const all = dt > 0 && dd >= dt;
-                const sM = (isT || isW) && missed.length > 0 && !isF;
-
-                return (
-                  <div key={ds} className={`card-hover bg-white rounded-2xl border shadow-sm overflow-hidden ${isT?'border-rose-400 ring-2 ring-rose-200':'border-stone-200'} ${isE?'bg-gradient-to-br from-rose-50 via-white to-amber-50':''}`}>
-                    <div className={`px-4 py-3 flex items-center justify-between ${isT?'bg-rose-500 text-white':isW?'bg-stone-100':'bg-stone-50'} ${isE?'!bg-gradient-to-r !from-rose-600 !to-red-500 !text-white':''}`}>
-                      <div className="flex items-center gap-2">
-                        <div className={`w-9 h-9 rounded-lg flex flex-col items-center justify-center font-bold ${isT||isE?'bg-white/20 text-white':'bg-white text-stone-700 border border-stone-200'}`}>
-                          <div className="text-[9px] leading-none">{d.wd}</div>
-                          <div className="text-sm leading-none mt-0.5 tabular-nums">{Number(ds.slice(8))}</div>
-                        </div>
-                        <div>
-                          <div className={`text-xs font-semibold tabular-nums ${isT||isE?'text-white/90':'text-stone-500'}`}>{Number(ds.slice(5,7))}월 {Number(ds.slice(8))}일</div>
-                          {d.special && <div className={`text-[11px] font-bold mt-0.5 ${isT||isE?'text-amber-200':'text-rose-600'}`}>{d.special}</div>}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        {isT && <div className="text-[10px] font-black text-amber-200 tracking-widest">TODAY</div>}
-                        {dt > 0 && (
-                          <div key={`${ds}-${dd}`} className={`text-xs tabular-nums font-mono count-up ${isT||isE?'text-white/80':'text-stone-500'}`}>
-                            {dd}/{dt} {all && '✓'}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="p-3 space-y-2">
-                      {d.tasks.map(t => <Task key={t.id} t={t} v={checked[t.id]||0} onT={()=>toggleFull(t)} onA={d=>adjust(t,d)} onE={()=>setQuickEdit(t)} anim={justChecked===t.id} />)}
-                      {sM && (
-                        <div className={`${d.tasks.length>0?'mt-3 pt-3 border-t-2 border-dashed border-amber-300':''}`}>
-                          <div className="flex items-center gap-1.5 mb-2">
-                            <Warn className="w-4 h-4 text-amber-600" />
-                            <span className="text-xs font-bold text-amber-800">{isT?'어제까지 밀린 · 남는 시간에 만회':'주말 만회'} ({missed.length}개)</span>
-                          </div>
-                          <div className="space-y-2">
-                            {missed.map(t => <Task key={`m-${t.id}`} t={t} v={checked[t.id]||0} onT={()=>toggleFull(t)} onA={d=>adjust(t,d)} onE={()=>setQuickEdit(t)} isMissed od={t.originalDate} anim={justChecked===t.id} />)}
-                          </div>
-                        </div>
-                      )}
-                      {d.tasks.length === 0 && !sM && (
-                        <div className="text-center text-stone-400 py-8 text-sm">
-                          <div className="text-2xl mb-1">{d.isHoliday?'🏖️':'😴'}</div>
-                          <div>{d.isHoliday?'휴일이야 · 진짜 쉬어':'쉬는 날'}</div>
-                        </div>
-                      )}
-                    </div>
+            {/* 지난 날짜 접기/펼치기 */}
+            {pastDates.length > 0 && (
+              <section className="mb-3">
+                <button onClick={() => setExpandedPast(!expandedPast)}
+                  className="w-full flex items-center justify-between gap-2 bg-white rounded-xl border border-stone-200 p-3 shadow-sm hover:bg-stone-50">
+                  <div className="flex items-center gap-2">
+                    <ChevronDown className={`w-4 h-4 text-stone-400 ${expandedPast?'rotate-180':''}`} />
+                    <span className="text-xs font-bold text-stone-500">
+                      지난 날짜 {pastDates.length}일 ({pastDates[0].slice(5).replace('-','/')}~{pastDates[pastDates.length-1].slice(5).replace('-','/')})
+                    </span>
                   </div>
+                  {!expandedPast && (
+                    <div className="flex gap-1">
+                      {pastDates.map(ds => (
+                        <span key={ds} className="text-[10px] text-stone-400 tabular-nums">{Number(ds.slice(8))}{dowN(ds)}</span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+                
+                {expandedPast && (
+                  <div className="space-y-3 mt-3">
+                    {pastDates.map((ds) => <DayCard key={ds} ds={ds} schedule={schedule} today={today} checked={checked} missed={[]} showMissed={false} onToggle={toggleFull} onAdjust={adjust} onQuickEdit={setQuickEdit} />)}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* 오늘 & 이후 날짜 */}
+            <section className="space-y-3">
+              {currentDates.map((ds) => {
+                const isToday = ds === today;
+                // 오늘 카드에만 밀린 과제 표시, 주말엔 표시 안 함 (요청사항: 오늘 카드 하단)
+                const showMissed = isToday && missed.length > 0;
+                return (
+                  <DayCard key={ds} ds={ds} schedule={schedule} today={today} checked={checked}
+                    missed={showMissed ? missed : []} showMissed={showMissed}
+                    onToggle={toggleFull} onAdjust={adjust} onQuickEdit={setQuickEdit} />
                 );
               })}
             </section>
-          </div>
+          </>
         ) : (
-          <div className="fade-in">
-            <Courses courses={courses} config={config} today={today}
-              onEdit={setEditing} onDel={deleteCourse}
-              onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'' })}
-              onTogH={toggleHoliday} updCfg={updateConfig} />
-          </div>
+          <Courses courses={courses} config={config} today={today}
+            onEdit={setEditing} onDel={deleteCourse}
+            onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'' })}
+            onTogH={toggleHoliday} updCfg={updateConfig} />
         )}
 
         <div className="mt-8 text-center space-y-2">
           <div className="text-[10px] text-stone-400">
             {!HAS_SUPABASE && '⚠️ 로컬 저장 (Supabase 연결 안 됨)'}
-            {HAS_SUPABASE && syncStatus==='ok' && '✅ Supabase 동기화 중 · 기기 간 실시간 공유'}
+            {HAS_SUPABASE && syncStatus==='ok' && '✅ Supabase 동기화 중'}
             {HAS_SUPABASE && syncStatus==='syncing' && '⏳ 동기화 중...'}
             {HAS_SUPABASE && syncStatus==='err' && '⚠️ DB 연결 실패'}
           </div>
-          <button onClick={resetAll} className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-rose-500 transition-colors">
+          <button onClick={resetAll} className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-rose-500">
             <Reset className="w-3 h-3" />체크 기록 초기화
           </button>
         </div>
@@ -660,8 +572,70 @@ function App() {
   );
 }
 
+// ========== DayCard ==========
+function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, onAdjust, onQuickEdit }) {
+  const d = schedule[ds];
+  if (!d) return null;
+  const isT = ds === today;
+  const isW = d.wd === '토' || d.wd === '일';
+  const isE = d.isExam;
+  const dt = d.tasks.reduce((s,t)=>s+t.target,0);
+  const dd = d.tasks.reduce((s,t)=>s+Math.min(checked[t.id]||0,t.target),0);
+  const all = dt > 0 && dd >= dt;
+
+  return (
+    <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${isT?'border-rose-400 ring-2 ring-rose-200':'border-stone-200'} ${isE?'bg-gradient-to-br from-rose-50 via-white to-amber-50':''}`}>
+      <div className={`px-4 py-3 flex items-center justify-between ${isT?'bg-rose-500 text-white':isW?'bg-stone-100':'bg-stone-50'} ${isE?'!bg-gradient-to-r !from-rose-600 !to-red-500 !text-white':''}`}>
+        <div className="flex items-center gap-2">
+          <div className={`w-9 h-9 rounded-lg flex flex-col items-center justify-center font-bold ${isT||isE?'bg-white/20 text-white':'bg-white text-stone-700 border border-stone-200'}`}>
+            <div className="text-[9px] leading-none">{d.wd}</div>
+            <div className="text-sm leading-none mt-0.5 tabular-nums">{Number(ds.slice(8))}</div>
+          </div>
+          <div>
+            <div className={`text-xs font-semibold tabular-nums ${isT||isE?'text-white/90':'text-stone-500'}`}>{Number(ds.slice(5,7))}월 {Number(ds.slice(8))}일</div>
+            {d.special && <div className={`text-[11px] font-bold mt-0.5 ${isT||isE?'text-amber-200':'text-rose-600'}`}>{d.special}</div>}
+          </div>
+        </div>
+        <div className="text-right">
+          {isT && <div className="text-[10px] font-black text-amber-200 tracking-widest">TODAY</div>}
+          {dt > 0 && (
+            <div className={`text-xs tabular-nums font-mono ${isT||isE?'text-white/80':'text-stone-500'}`}>
+              {dd}/{dt} {all && '✓'}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="p-3 space-y-2">
+        {d.tasks.map(t => <Task key={t.id} t={t} v={checked[t.id]||0} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} />)}
+        
+        {/* 오늘 카드 하단에 밀린 과제 */}
+        {showMissed && missed.length > 0 && (
+          <div className="mt-3 pt-3 border-t-2 border-dashed border-amber-300">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Warn className="w-4 h-4 text-amber-600" />
+              <span className="text-xs font-bold text-amber-800">
+                밀린 과제 · 남는 시간에 만회 ({missed.length}개)
+              </span>
+            </div>
+            <div className="space-y-2">
+              {missed.map(t => <Task key={`m-${t.id}`} t={t} v={checked[t.id]||0} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} isMissed od={t.originalDate} />)}
+            </div>
+          </div>
+        )}
+        
+        {d.tasks.length === 0 && !showMissed && (
+          <div className="text-center text-stone-400 py-8 text-sm">
+            <div className="text-2xl mb-1">{d.isHoliday?'🏖️':'😴'}</div>
+            <div>{d.isHoliday?'휴일이야 · 진짜 쉬어':'쉬는 날'}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ========== Task ==========
-function Task({ t, v, onT, onA, onE, anim, isMissed, od }) {
+function Task({ t, v, onT, onA, onE, isMissed, od }) {
   const cfg = getSub(t.subject);
   const tgt = t.target;
   const isQ = t.type === 'quota' && tgt > 1;
@@ -669,8 +643,8 @@ function Task({ t, v, onT, onA, onE, anim, isMissed, od }) {
   const step = tgt >= 100 ? 10 : tgt >= 20 ? 5 : 1;
 
   return (
-    <div className={`flex items-start gap-2 p-3 rounded-xl transition-all duration-300 ${done?'bg-stone-50 border border-stone-200':`${cfg.bg} border ${cfg.bd}`} ${isMissed&&!done?'ring-1 ring-amber-300':''}`}>
-      <button onClick={onT} className={`check-btn flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center mt-0.5 ${done?'bg-emerald-500 border-emerald-500':partial?'bg-amber-100 border-amber-400':`bg-white ${cfg.bd.replace('-200','-400')}`} ${anim?'pop':''}`}>
+    <div className={`flex items-start gap-2 p-3 rounded-xl ${done?'bg-stone-50 border border-stone-200':`${cfg.bg} border ${cfg.bd}`} ${isMissed&&!done?'ring-1 ring-amber-300':''}`}>
+      <button onClick={onT} className={`flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center mt-0.5 ${done?'bg-emerald-500 border-emerald-500':partial?'bg-amber-100 border-amber-400':`bg-white ${cfg.bd.replace('-200','-400')}`}`}>
         {done && <Check className="w-4 h-4 text-white" />}
         {partial && !done && <div className="w-2.5 h-2.5 bg-amber-500 rounded-sm" />}
       </button>
@@ -680,21 +654,21 @@ function Task({ t, v, onT, onA, onE, anim, isMissed, od }) {
           {isMissed && od && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 tabular-nums">{Number(od.slice(5,7))}/{Number(od.slice(8))} 놓침</span>}
           {over && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">🔥 초과</span>}
         </div>
-        <div className={`text-sm font-semibold transition-all ${done&&!over?'text-stone-400 line-through':'text-stone-800'}`}>
+        <div className={`text-sm font-semibold ${done&&!over?'text-stone-400 line-through':'text-stone-800'}`}>
           {t.text}
           {isQ && <span className="ml-1 text-stone-500 font-normal">{tgt}{t.unit}</span>}
         </div>
         {t.note && <div className={`text-xs mt-0.5 ${done&&!over?'text-stone-300':'text-stone-500'}`}>{t.note}</div>}
         {isQ && (
           <div className="mt-2 flex items-center gap-2">
-            <button onClick={()=>onA(-step)} disabled={v<=0} className="check-btn w-7 h-7 flex items-center justify-center bg-white border border-stone-300 rounded-md hover:bg-stone-100 disabled:opacity-30">
+            <button onClick={()=>onA(-step)} disabled={v<=0} className="w-7 h-7 flex items-center justify-center bg-white border border-stone-300 rounded-md hover:bg-stone-100 disabled:opacity-30">
               <Minus className="w-3.5 h-3.5" />
             </button>
-            <button onClick={onE} className="flex-1 min-w-0 text-center tabular-nums font-mono font-bold text-sm py-1.5 rounded-md bg-white border border-stone-300 hover:bg-stone-100 transition-colors">
-              <span key={v} className={`count-up inline-block ${over?'text-purple-700':partial?'text-amber-700':done?'text-emerald-700':'text-stone-700'}`}>{v}</span>
+            <button onClick={onE} className="flex-1 min-w-0 text-center tabular-nums font-mono font-bold text-sm py-1.5 rounded-md bg-white border border-stone-300 hover:bg-stone-100">
+              <span className={over?'text-purple-700':partial?'text-amber-700':done?'text-emerald-700':'text-stone-700'}>{v}</span>
               <span className="text-stone-400"> / {tgt}{t.unit}</span>
             </button>
-            <button onClick={()=>onA(step)} className="check-btn w-7 h-7 flex items-center justify-center bg-white border border-stone-300 rounded-md hover:bg-stone-100">
+            <button onClick={()=>onA(step)} className="w-7 h-7 flex items-center justify-center bg-white border border-stone-300 rounded-md hover:bg-stone-100">
               <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -712,11 +686,11 @@ function QuickEdit({ task, cur, onSet, onClose }) {
   const qv = [0, Math.floor(task.target/2), task.target, task.target + Math.floor(task.target*0.3)];
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 fade-in" onClick={onClose}>
-      <div className="bg-white w-full max-w-sm rounded-t-3xl sm:rounded-3xl shadow-2xl slide-up" onClick={e=>e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-sm rounded-t-3xl sm:rounded-3xl shadow-2xl" onClick={e=>e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-stone-200 flex items-center justify-between">
           <h3 className="text-base font-bold">몇 개 했어?</h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-stone-100 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+          <button onClick={onClose} className="p-1.5 hover:bg-stone-100 rounded-lg"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-4 space-y-4">
           <div className={`${cfg.bg} ${cfg.bd} border rounded-xl p-3`}>
@@ -726,7 +700,7 @@ function QuickEdit({ task, cur, onSet, onClose }) {
           </div>
           <div>
             <input type="number" value={inp} onChange={e=>setInp(e.target.value)} onFocus={e=>e.target.select()} autoFocus
-              className="w-full px-4 py-4 text-3xl font-black text-center tabular-nums bg-stone-50 border-2 border-stone-200 rounded-xl focus:outline-none focus:border-rose-400 transition-colors" />
+              className="w-full px-4 py-4 text-3xl font-black text-center tabular-nums bg-stone-50 border-2 border-stone-200 rounded-xl focus:outline-none focus:border-rose-400" />
             <div className="text-center text-stone-500 text-sm mt-1 tabular-nums">/ {task.target}{task.unit}</div>
           </div>
           <div>
@@ -734,14 +708,14 @@ function QuickEdit({ task, cur, onSet, onClose }) {
             <div className="grid grid-cols-4 gap-1.5">
               {qv.map((v,i) => (
                 <button key={i} onClick={()=>setInp(String(v))}
-                  className={`py-2 rounded-lg text-sm font-bold tabular-nums transition-all ${Number(inp)===v?'bg-rose-500 text-white scale-105':'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}>{v}</button>
+                  className={`py-2 rounded-lg text-sm font-bold tabular-nums ${Number(inp)===v?'bg-rose-500 text-white':'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}>{v}</button>
               ))}
             </div>
           </div>
         </div>
         <div className="border-t border-stone-200 p-3 flex gap-2">
-          <button onClick={onClose} className="flex-1 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-sm font-bold transition-colors">취소</button>
-          <button onClick={save} className="flex-[2] py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold transition-colors active:scale-95">저장</button>
+          <button onClick={onClose} className="flex-1 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-sm font-bold">취소</button>
+          <button onClick={save} className="flex-[2] py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold">저장</button>
         </div>
       </div>
     </div>
@@ -757,15 +731,15 @@ function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg 
   return (
     <>
       <section className="mb-4 bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-sm">
-        <button onClick={()=>setCO(!cO)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-stone-50 transition-colors">
+        <button onClick={()=>setCO(!cO)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-stone-50">
           <div className="flex items-center gap-2"><Target className="w-4 h-4 text-stone-600" /><span className="text-sm font-bold text-stone-700">시험·기간 설정</span></div>
-          <ChevronRight className={`w-4 h-4 text-stone-400 transition-transform ${cO?'rotate-90':''}`} />
+          <ChevronRight className={`w-4 h-4 text-stone-400 ${cO?'rotate-90':''}`} />
         </button>
         {cO && (
-          <div className="px-4 pb-4 pt-1 space-y-2 fade-in">
+          <div className="px-4 pb-4 pt-1 space-y-2">
             <Row label="시험 이름">
               <input type="text" value={config.examName} onChange={e=>updCfg({...config, examName:e.target.value})}
-                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:border-stone-400 transition-colors" />
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
             </Row>
             <div className="grid grid-cols-2 gap-2">
               <Row label="시작일">
@@ -782,23 +756,23 @@ function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg 
       </section>
 
       <section className="mb-4 bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-sm">
-        <button onClick={()=>setHO(!hO)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-stone-50 transition-colors">
+        <button onClick={()=>setHO(!hO)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-stone-50">
           <div className="flex items-center gap-2"><CalOff className="w-4 h-4 text-stone-600" /><span className="text-sm font-bold text-stone-700">휴일 관리 ({config.holidays.length})</span></div>
-          <ChevronRight className={`w-4 h-4 text-stone-400 transition-transform ${hO?'rotate-90':''}`} />
+          <ChevronRight className={`w-4 h-4 text-stone-400 ${hO?'rotate-90':''}`} />
         </button>
         {hO && (
-          <div className="px-4 pb-4 pt-1 space-y-2 fade-in">
+          <div className="px-4 pb-4 pt-1 space-y-2">
             <div className="flex gap-2">
               <input type="date" value={nh} onChange={e=>setNh(e.target.value)}
                 className="flex-1 px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
               <button onClick={()=>{ if(nh && !config.holidays.includes(nh)){onTogH(nh); setNh('');} }}
-                className="px-3 py-2 bg-stone-800 text-white rounded-lg text-sm font-semibold hover:bg-stone-700 transition-colors active:scale-95">추가</button>
+                className="px-3 py-2 bg-stone-800 text-white rounded-lg text-sm font-semibold">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {config.holidays.length===0 && <span className="text-xs text-stone-400">등록된 휴일 없음</span>}
               {[...config.holidays].sort().map(h => (
                 <span key={h} className="inline-flex items-center gap-1 px-2 py-1 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-semibold tabular-nums">
-                  {h}<button onClick={()=>onTogH(h)} className="hover:text-rose-900 transition-colors"><X className="w-3 h-3" /></button>
+                  {h}<button onClick={()=>onTogH(h)} className="hover:text-rose-900"><X className="w-3 h-3" /></button>
                 </span>
               ))}
             </div>
@@ -809,7 +783,7 @@ function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg 
       <section className="space-y-3 mb-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-stone-700">내 강좌</h2>
-          <button onClick={onAdd} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs font-bold transition-all active:scale-95">
+          <button onClick={onAdd} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs font-bold">
             <Plus className="w-4 h-4" />강좌 추가
           </button>
         </div>
@@ -830,7 +804,7 @@ function CCard({ c, h, cfg, td, onE, onD }) {
   const s = cStats(c, h, cfg, td);
   const DOW = ['일','월','화','수','목','금','토'];
   return (
-    <div className={`card-hover bg-white border ${col.bd} rounded-2xl shadow-sm overflow-hidden`}>
+    <div className={`bg-white border ${col.bd} rounded-2xl shadow-sm overflow-hidden`}>
       <div className={`px-4 py-3 ${col.bg} border-b ${col.bd} flex items-start justify-between gap-2`}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -841,8 +815,8 @@ function CCard({ c, h, cfg, td, onE, onD }) {
           {c.note && <div className="text-[11px] text-stone-500 mt-0.5">{c.note}</div>}
         </div>
         <div className="flex gap-1">
-          <button onClick={onE} className="p-1.5 hover:bg-white rounded-lg transition-colors"><Edit className="w-4 h-4" /></button>
-          <button onClick={onD} className="p-1.5 hover:bg-white rounded-lg hover:text-rose-600 transition-colors"><Trash className="w-4 h-4" /></button>
+          <button onClick={onE} className="p-1.5 hover:bg-white rounded-lg"><Edit className="w-4 h-4" /></button>
+          <button onClick={onD} className="p-1.5 hover:bg-white rounded-lg hover:text-rose-600"><Trash className="w-4 h-4" /></button>
         </div>
       </div>
       <div className="px-4 py-3 text-xs space-y-1.5">
@@ -869,7 +843,7 @@ function CCard({ c, h, cfg, td, onE, onD }) {
           <span className="text-stone-500">요일</span>
           <div className="flex gap-0.5">
             {[0,1,2,3,4,5,6].map(d => (
-              <span key={d} className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold transition-all ${c.days.includes(d)?`${col.br} text-white`:'bg-stone-100 text-stone-400'}`}>{DOW[d]}</span>
+              <span key={d} className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${c.days.includes(d)?`${col.br} text-white`:'bg-stone-100 text-stone-400'}`}>{DOW[d]}</span>
             ))}
           </div>
         </div>
@@ -888,33 +862,33 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const DOW = ['일','월','화','수','목','금','토'];
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 fade-in">
-      <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[90vh] overflow-y-auto shadow-2xl slide-up">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="sticky top-0 bg-white border-b border-stone-200 px-4 py-3 flex items-center justify-between z-10">
           <h3 className="text-base font-bold">{course.isNew?'새 강좌 추가':'강좌 편집'}</h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-stone-100 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+          <button onClick={onClose} className="p-1.5 hover:bg-stone-100 rounded-lg"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-4 space-y-4">
           <Row label="강좌 이름" req>
             <input type="text" value={f.name} onChange={e=>up({name:e.target.value})} placeholder="예: 수능특강 국어"
-              className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 transition-all" />
+              className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
           </Row>
           <Row label="과목 분류">
             <div className="grid grid-cols-4 gap-1.5">
               {SUB_LIST.map(s => {
                 const sc = getSub(s), a = f.subject === s;
                 return <button key={s} onClick={()=>up({subject:s})}
-                  className={`py-2 rounded-lg text-xs font-semibold transition-all ${a?`${sc.ch} ring-2 ring-offset-1 ring-stone-800 scale-105`:'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}>{s}</button>;
+                  className={`py-2 rounded-lg text-xs font-semibold ${a?`${sc.ch} ring-2 ring-offset-1 ring-stone-800`:'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}>{s}</button>;
               })}
             </div>
           </Row>
           <Row label="타입">
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={()=>up({type:'lesson'})} className={`p-3 rounded-xl border-2 text-left transition-all ${f.type==='lesson'?'bg-rose-50 border-rose-400':'bg-white border-stone-200 hover:border-stone-300'}`}>
+              <button onClick={()=>up({type:'lesson'})} className={`p-3 rounded-xl border-2 text-left ${f.type==='lesson'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
                 <div className={`flex items-center gap-1.5 mb-0.5 ${f.type==='lesson'?'text-rose-700':'text-stone-600'}`}><Book className="w-4 h-4" /><span className="text-xs font-bold">진도형</span></div>
                 <div className="text-[10px] text-stone-500">총 N강 중 1강씩</div>
               </button>
-              <button onClick={()=>up({type:'quota'})} className={`p-3 rounded-xl border-2 text-left transition-all ${f.type==='quota'?'bg-rose-50 border-rose-400':'bg-white border-stone-200 hover:border-stone-300'}`}>
+              <button onClick={()=>up({type:'quota'})} className={`p-3 rounded-xl border-2 text-left ${f.type==='quota'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
                 <div className={`flex items-center gap-1.5 mb-0.5 ${f.type==='quota'?'text-rose-700':'text-stone-600'}`}><Spark className="w-4 h-4" /><span className="text-xs font-bold">분량형</span></div>
                 <div className="text-[10px] text-stone-500">하루 N개씩 +/-</div>
               </button>
@@ -958,7 +932,7 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
           <Row label="배치 요일" req>
             <div className="grid grid-cols-7 gap-1">
               {DOW.map((n, d) => (
-                <button key={d} onClick={()=>tD(d)} className={`py-2.5 rounded-lg text-xs font-bold transition-all ${f.days.includes(d)?'bg-rose-500 text-white scale-105':'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}>{n}</button>
+                <button key={d} onClick={()=>tD(d)} className={`py-2.5 rounded-lg text-xs font-bold ${f.days.includes(d)?'bg-rose-500 text-white':'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}>{n}</button>
               ))}
             </div>
           </Row>
@@ -985,9 +959,9 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
           )}
         </div>
         <div className="sticky bottom-0 bg-white border-t border-stone-200 px-4 py-3 flex gap-2">
-          <button onClick={onClose} className="flex-1 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-sm font-bold transition-colors">취소</button>
+          <button onClick={onClose} className="flex-1 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-sm font-bold">취소</button>
           <button onClick={()=>ok && onSave(f)} disabled={!ok}
-            className="flex-[2] py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold disabled:bg-stone-300 disabled:cursor-not-allowed transition-all active:scale-95">저장</button>
+            className="flex-[2] py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold disabled:bg-stone-300 disabled:cursor-not-allowed">저장</button>
         </div>
       </div>
     </div>
