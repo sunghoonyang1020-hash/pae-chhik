@@ -21,6 +21,28 @@
   }
   .tabular-nums { font-variant-numeric: tabular-nums; }
   ::-webkit-scrollbar { display: none; }
+  
+  /* 체크박스 누를 때 부드러운 반응 (과하지 않게) */
+  @keyframes checkPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+  }
+  .check-pop { animation: checkPop 0.25s ease-out; }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .fade-in { animation: fadeIn 0.2s ease-out; }
+  
+  /* 히트맵 셀 */
+  .heat-cell {
+    transition: transform 0.1s ease;
+  }
+  .heat-cell:active {
+    transform: scale(1.3);
+  }
 </style>
 </head>
 <body>
@@ -69,6 +91,9 @@ const Reset = (p) => <Icon {...p} d={<><path d="M1 4v6h6"/><path d="M3.51 15a9 9
 const Spark = (p) => <Icon {...p} d={<><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/></>} />;
 const Trending = (p) => <Icon {...p} d={<><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></>} />;
 const CalOff = (p) => <Icon {...p} d={<><line x1="4.18" y1="4.18" x2="2" y2="2"/><line x1="22" y1="22" x2="19.82" y2="19.82"/><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></>} />;
+const Flame = (p) => <Icon {...p} d={<><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></>} />;
+const Trophy = (p) => <Icon {...p} d={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />;
+const Award = (p) => <Icon {...p} d={<><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></>} />;
 
 // ========== 과목 팔레트 ==========
 const SUBJECTS = {
@@ -99,6 +124,11 @@ const dDay = (f, t) => Math.ceil((pd(t) - pd(f)) / 86400000);
 const daysBtw = (f, t) => { const o=[]; let c=pd(f); const e=pd(t); while(c<=e){o.push(fd(c)); c=addD(c,1);} return o; };
 const isUUID = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
+// ========== checked 값 정규화 ==========
+// checked[taskId]는 숫자(값) 또는 { v: 값, ca: 완료일 } 형태 지원
+const getVal = (c) => typeof c === 'object' && c !== null ? (c.v || 0) : (c || 0);
+const getCA = (c) => typeof c === 'object' && c !== null ? c.ca : null;
+
 // ========== 기본 데이터 ==========
 const DEFAULT_CONFIG = { examName:'6월 모의고사', startDate:'2026-04-19', endDate:'2026-06-03', holidays:['2026-05-04','2026-05-05'] };
 const DEFAULT_COURSES = [
@@ -115,12 +145,10 @@ const DEFAULT_COURSES = [
   { name:'학원', subject:'학원', type:'quota', dailyAmount:2, unit:'h', days:[1,5], nonCarryable:true, note:'정보성 표시 (이월 X)', sortOrder:11 },
 ];
 
-const fromDb = (r) => ({ id:r.id, name:r.name, subject:r.subject, type:r.type, totalLessons:r.total_lessons, doneLessons:r.done_lessons, dailyAmount:r.daily_amount, unit:r.unit||'개', targetDate:r.target_date, days:r.days||[], postCompleteText:r.post_complete_text, note:r.note, nonCarryable:r.non_carryable, sortOrder:r.sort_order });
-const toDb = (c) => ({ name:c.name, subject:c.subject, type:c.type, total_lessons:c.totalLessons??null, done_lessons:c.doneLessons??0, daily_amount:c.dailyAmount??null, unit:c.unit, target_date:c.targetDate??null, days:c.days, post_complete_text:c.postCompleteText??null, note:c.note??null, non_carryable:c.nonCarryable??false, sort_order:c.sortOrder??0 });
+const fromDb = (r) => ({ id:r.id, name:r.name, subject:r.subject, type:r.type, totalLessons:r.total_lessons, doneLessons:r.done_lessons, dailyAmount:r.daily_amount, unit:r.unit||'개', targetDate:r.target_date, days:r.days||[], customDates:r.custom_dates||[], postCompleteText:r.post_complete_text, note:r.note, nonCarryable:r.non_carryable, sortOrder:r.sort_order });
+const toDb = (c) => ({ name:c.name, subject:c.subject, type:c.type, total_lessons:c.totalLessons??null, done_lessons:c.doneLessons??0, daily_amount:c.dailyAmount??null, unit:c.unit, target_date:c.targetDate??null, days:c.days||[], custom_dates:c.customDates||[], post_complete_text:c.postCompleteText??null, note:c.note??null, non_carryable:c.nonCarryable??false, sort_order:c.sortOrder??0 });
 
 // ========== 스케줄 빌더 ==========
-// 핵심 수정: "오늘 분량" 가상 태스크 제거
-// → 강좌의 days가 startDate 요일을 포함 안 해도 첫날에 강좌의 진도를 1회 배치
 function buildSchedule(courses, holidays, config) {
   const s = {};
   const all = daysBtw(config.startDate, config.endDate);
@@ -131,6 +159,21 @@ function buildSchedule(courses, holidays, config) {
   const sorted = [...courses].sort((a,b) => (a.sortOrder??99)-(b.sortOrder??99));
   
   for (const c of sorted) {
+    if (c.type === 'custom') {
+      const dates = c.customDates || [];
+      for (const ds of dates) {
+        if (!s[ds]) continue;
+        if (s[ds].isHoliday) continue;
+        const tid = `${c.id}:${ds}`;
+        s[ds].tasks.push({ 
+          id:tid, courseId:c.id, subject:c.subject, 
+          text:c.name, note:c.note, unit:c.unit || '', 
+          target:1, type:'custom', carryable:!c.nonCarryable 
+        });
+      }
+      continue;
+    }
+    
     let p = c.doneLessons || 0;
     for (const ds of all) {
       if (s[ds].isHoliday) continue;
@@ -150,13 +193,11 @@ function buildSchedule(courses, holidays, config) {
     }
   }
   
-  // 첫날 표시
   const first = config.startDate;
   if (s[first] && s[first].tasks.length > 0 && !s[first].special) {
     s[first].special = '🎯 시작일';
   }
   
-  // 시험일
   if (s[config.endDate]) {
     s[config.endDate].special = `🚀 ${config.examName} D-DAY`;
     s[config.endDate].isExam = true;
@@ -166,6 +207,11 @@ function buildSchedule(courses, holidays, config) {
 }
 
 function cStats(c, holidays, cfg, today) {
+  if (c.type === 'custom') {
+    const dates = c.customDates || [];
+    const future = dates.filter(d => pd(d) >= pd(today) && pd(d) <= pd(cfg.endDate));
+    return { type:'custom', scheduled:dates.length, upcoming:future.length };
+  }
   const tgt = c.targetDate || cfg.endDate;
   const from = pd(today) > pd(cfg.startDate) ? today : cfg.startDate;
   const all = daysBtw(from, tgt);
@@ -189,10 +235,11 @@ function App() {
   
   const [today, setToday] = useState(DEFAULT_CONFIG.startDate);
   const [anchor, setAnchor] = useState(DEFAULT_CONFIG.startDate);
-  const [view, setView] = useState('calendar');
+  const [view, setView] = useState('calendar'); // calendar | courses | achievement
   const [editing, setEditing] = useState(null);
   const [quickEdit, setQuickEdit] = useState(null);
-  const [expandedPast, setExpandedPast] = useState(false); // 지난 날짜 펼치기
+  const [expandedPast, setExpandedPast] = useState(false);
+  const [popTaskId, setPopTaskId] = useState(null);
 
   // 초기 로드
   useEffect(() => {
@@ -249,7 +296,11 @@ function App() {
         
         if (chR.data) {
           const m = {};
-          for (const r of chR.data) m[`${r.course_id}:${r.task_date}`] = r.achieved;
+          for (const r of chR.data) {
+            // updated_at에서 날짜만 추출해서 완료일로 저장
+            const ca = r.updated_at ? r.updated_at.slice(0, 10) : r.task_date;
+            m[`${r.course_id}:${r.task_date}`] = { v: r.achieved, ca };
+          }
           setChecked(m);
         }
         
@@ -277,33 +328,57 @@ function App() {
     } catch (e) { console.error(e); }
   }, []);
 
+  // 체크: 완료일(ca) 기록 포함
   const toggleFull = (t) => {
     const [cid, td] = t.id.split(':');
     if (cid === 'exam') return;
+    const today = fd(new Date());
     setChecked(prev => {
-      const cur = prev[t.id] || 0;
+      const cur = getVal(prev[t.id]);
       const nv = cur >= t.target ? 0 : t.target;
       saveCheckDb(cid, td, nv);
-      return { ...prev, [t.id]: nv };
+      if (nv === 0) {
+        const { [t.id]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [t.id]: { v: nv, ca: today } };
     });
+    // 체크(완료)일 때만 팝 애니메이션
+    const curVal = getVal(checked[t.id]);
+    if (curVal < t.target) {
+      setPopTaskId(t.id);
+      setTimeout(() => setPopTaskId(null), 260);
+    }
   };
 
   const adjust = (t, delta) => {
     const [cid, td] = t.id.split(':');
     if (cid === 'exam') return;
+    const today = fd(new Date());
     setChecked(prev => {
-      const cur = prev[t.id] || 0;
+      const cur = getVal(prev[t.id]);
       const v = Math.max(0, cur + delta);
       saveCheckDb(cid, td, v);
-      return { ...prev, [t.id]: v };
+      if (v === 0) {
+        const { [t.id]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [t.id]: { v, ca: today } };
     });
   };
 
   const setVal = (tid, v) => {
     const [cid, td] = tid.split(':');
     const val = Math.max(0, v);
-    setChecked(prev => ({ ...prev, [tid]: val }));
-    saveCheckDb(cid, td, val);
+    const today = fd(new Date());
+    setChecked(prev => {
+      saveCheckDb(cid, td, val);
+      if (val === 0) {
+        const { [tid]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [tid]: { v: val, ca: today } };
+    });
   };
 
   const resetAll = async () => {
@@ -365,6 +440,7 @@ function App() {
   const allDates = useMemo(() => Object.keys(schedule).sort(), [schedule]);
   const wd = useMemo(() => weekDates(anchor), [anchor]);
 
+  // 만회: 진도형/단발형만 (분량형, exam 제외)
   const missed = useMemo(() => {
     const out = [];
     for (const ds of allDates) {
@@ -373,7 +449,10 @@ function App() {
       if (!d || d.isHoliday) continue;
       for (const t of d.tasks) {
         if (!t.carryable) continue;
-        const v = checked[t.id] || 0;
+        if (t.type === 'quota') continue; // 분량형 제외
+        if (t.type === 'custom') continue; // 단발형 제외
+        if (t.courseId === 'exam') continue;
+        const v = getVal(checked[t.id]);
         if (v < t.target) out.push({ ...t, originalDate: ds });
       }
     }
@@ -386,7 +465,7 @@ function App() {
     for (const ds of allDates) {
       for (const t of schedule[ds].tasks) {
         if (t.courseId === 'exam') continue;
-        const v = Math.min(checked[t.id] || 0, t.target);
+        const v = Math.min(getVal(checked[t.id]), t.target);
         total += t.target; done += v;
         if (!bySub[t.subject]) bySub[t.subject] = { total:0, done:0 };
         bySub[t.subject].total += t.target;
@@ -398,8 +477,6 @@ function App() {
 
   const dL = dDay(today, config.endDate);
   const [ws, we] = [wd[0], wd[6]];
-
-  // 이번 주에서 "지난 날짜" 와 "오늘 이후" 분리
   const pastDates = wd.filter(ds => pd(ds) < pd(today));
   const currentDates = wd.filter(ds => pd(ds) >= pd(today));
 
@@ -437,27 +514,31 @@ function App() {
               <span className="tabular-nums">{stats.done} / {stats.total} ({Math.round(stats.done/(stats.total||1)*100)}%)</span>
             </div>
             <div className="h-2 bg-stone-700 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400"
+              <div className="h-full bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 transition-all duration-500"
                 style={{ width: `${stats.total ? stats.done/stats.total*100 : 0}%` }} />
             </div>
           </div>
 
           <div className="mt-3 flex gap-1 p-1 bg-stone-700/50 rounded-lg">
             <button onClick={() => setView('calendar')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-bold ${view==='calendar'?'bg-white text-stone-900':'text-stone-300'}`}>
+              className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-md text-[11px] font-bold transition-colors ${view==='calendar'?'bg-white text-stone-900':'text-stone-300'}`}>
               <Cal className="w-3.5 h-3.5" />캘린더
             </button>
+            <button onClick={() => setView('achievement')}
+              className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-md text-[11px] font-bold transition-colors ${view==='achievement'?'bg-white text-stone-900':'text-stone-300'}`}>
+              <Trophy className="w-3.5 h-3.5" />달성
+            </button>
             <button onClick={() => setView('courses')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-bold ${view==='courses'?'bg-white text-stone-900':'text-stone-300'}`}>
-              <Book className="w-3.5 h-3.5" />강좌 관리 ({courses.length})
+              className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-md text-[11px] font-bold transition-colors ${view==='courses'?'bg-white text-stone-900':'text-stone-300'}`}>
+              <Book className="w-3.5 h-3.5" />강좌 ({courses.length})
             </button>
           </div>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-5 pb-24">
-        {view === 'calendar' ? (
-          <>
+        {view === 'calendar' && (
+          <div className="fade-in">
             <section className="mb-5">
               <div className="flex items-center gap-2 mb-3">
                 <Trending className="w-4 h-4 text-stone-600" />
@@ -475,7 +556,7 @@ function App() {
                         <span className="text-[11px] text-stone-500 tabular-nums">{st.done}/{st.total}</span>
                       </div>
                       <div className="h-1.5 bg-white/60 rounded-full overflow-hidden">
-                        <div className={`h-full ${cfg.br}`} style={{width:`${pct}%`}} />
+                        <div className={`h-full ${cfg.br} transition-all duration-500`} style={{width:`${pct}%`}} />
                       </div>
                     </div>
                   );
@@ -504,13 +585,12 @@ function App() {
               </div>
             </section>
 
-            {/* 지난 날짜 접기/펼치기 */}
             {pastDates.length > 0 && (
               <section className="mb-3">
                 <button onClick={() => setExpandedPast(!expandedPast)}
                   className="w-full flex items-center justify-between gap-2 bg-white rounded-xl border border-stone-200 p-3 shadow-sm hover:bg-stone-50">
                   <div className="flex items-center gap-2">
-                    <ChevronDown className={`w-4 h-4 text-stone-400 ${expandedPast?'rotate-180':''}`} />
+                    <ChevronDown className={`w-4 h-4 text-stone-400 transition-transform ${expandedPast?'rotate-180':''}`} />
                     <span className="text-xs font-bold text-stone-500">
                       지난 날짜 {pastDates.length}일 ({pastDates[0].slice(5).replace('-','/')}~{pastDates[pastDates.length-1].slice(5).replace('-','/')})
                     </span>
@@ -526,31 +606,39 @@ function App() {
                 
                 {expandedPast && (
                   <div className="space-y-3 mt-3">
-                    {pastDates.map((ds) => <DayCard key={ds} ds={ds} schedule={schedule} today={today} checked={checked} missed={[]} showMissed={false} onToggle={toggleFull} onAdjust={adjust} onQuickEdit={setQuickEdit} />)}
+                    {pastDates.map((ds) => <DayCard key={ds} ds={ds} schedule={schedule} today={today} checked={checked} missed={[]} showMissed={false} onToggle={toggleFull} onAdjust={adjust} onQuickEdit={setQuickEdit} popTaskId={popTaskId} />)}
                   </div>
                 )}
               </section>
             )}
 
-            {/* 오늘 & 이후 날짜 */}
             <section className="space-y-3">
               {currentDates.map((ds) => {
                 const isToday = ds === today;
-                // 오늘 카드에만 밀린 과제 표시, 주말엔 표시 안 함 (요청사항: 오늘 카드 하단)
                 const showMissed = isToday && missed.length > 0;
                 return (
                   <DayCard key={ds} ds={ds} schedule={schedule} today={today} checked={checked}
                     missed={showMissed ? missed : []} showMissed={showMissed}
-                    onToggle={toggleFull} onAdjust={adjust} onQuickEdit={setQuickEdit} />
+                    onToggle={toggleFull} onAdjust={adjust} onQuickEdit={setQuickEdit} popTaskId={popTaskId} />
                 );
               })}
             </section>
-          </>
-        ) : (
-          <Courses courses={courses} config={config} today={today}
-            onEdit={setEditing} onDel={deleteCourse}
-            onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'' })}
-            onTogH={toggleHoliday} updCfg={updateConfig} />
+          </div>
+        )}
+
+        {view === 'achievement' && (
+          <div className="fade-in">
+            <Achievement courses={courses} checked={checked} config={config} today={today} schedule={schedule} />
+          </div>
+        )}
+
+        {view === 'courses' && (
+          <div className="fade-in">
+            <Courses courses={courses} config={config} today={today}
+              onEdit={setEditing} onDel={deleteCourse}
+              onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'' })}
+              onTogH={toggleHoliday} updCfg={updateConfig} />
+          </div>
         )}
 
         <div className="mt-8 text-center space-y-2">
@@ -567,20 +655,442 @@ function App() {
       </main>
 
       {editing && <CourseForm course={editing} onSave={saveCourse} onClose={()=>setEditing(null)} holidays={config.holidays} config={config} today={today} />}
-      {quickEdit && <QuickEdit task={quickEdit} cur={checked[quickEdit.id]||0} onSet={v=>setVal(quickEdit.id,v)} onClose={()=>setQuickEdit(null)} />}
+      {quickEdit && <QuickEdit task={quickEdit} cur={getVal(checked[quickEdit.id])} onSet={v=>setVal(quickEdit.id,v)} onClose={()=>setQuickEdit(null)} />}
     </div>
   );
 }
 
+// ========== 🏆 달성 달력 (성취감 대시보드) ==========
+function Achievement({ courses, checked, config, today, schedule }) {
+  // 각 날짜별 달성량 집계 (ca = 실제 완료일 기준)
+  const achievements = useMemo(() => {
+    const byDate = {}; // { 'YYYY-MM-DD': { total, done, tasks: [{...}] } }
+    const allDates = daysBtw(config.startDate, config.endDate);
+    
+    // 1. 각 예정 날짜의 총 목표 집계 (ds = 원래 예정일)
+    for (const ds of allDates) {
+      const day = schedule[ds];
+      if (!day) continue;
+      byDate[ds] = { total: 0, done: 0, doneOnDate: 0, tasks: [], completedElsewhere: 0 };
+      for (const t of day.tasks) {
+        if (t.courseId === 'exam') continue;
+        byDate[ds].total += t.target;
+        byDate[ds].tasks.push(t);
+      }
+    }
+    
+    // 2. 체크된 것들을 예정일 + 실제 완료일 양쪽에 기록
+    for (const [tid, v] of Object.entries(checked)) {
+      const val = getVal(v);
+      const ca = getCA(v);
+      if (val <= 0) continue;
+      
+      const [cid, td] = tid.split(':');
+      if (cid === 'exam') continue;
+      
+      // 해당 task 찾기
+      let taskTarget = 1;
+      if (schedule[td]) {
+        const t = schedule[td].tasks.find(x => x.id === tid);
+        if (t) taskTarget = t.target;
+      }
+      const doneAmount = Math.min(val, taskTarget);
+      
+      // 예정일의 done 증가
+      if (byDate[td]) {
+        byDate[td].done += doneAmount;
+      }
+      
+      // 실제 완료일(ca)이 있고 예정일(td)과 다르면 → 만회한 날에 기록
+      if (ca && ca !== td && byDate[ca]) {
+        byDate[ca].doneOnDate += doneAmount;
+      } else if (byDate[td]) {
+        // ca 없거나 같으면 → 예정일 그대로
+        byDate[td].doneOnDate += doneAmount;
+      }
+    }
+    
+    return byDate;
+  }, [checked, schedule, config]);
+
+  // 달성 강도 (0~4): GitHub 잔디밭 스타일
+  const getIntensity = (ds) => {
+    const d = achievements[ds];
+    if (!d || d.doneOnDate === 0) return 0;
+    if (d.doneOnDate < 20) return 1;
+    if (d.doneOnDate < 50) return 2;
+    if (d.doneOnDate < 100) return 3;
+    return 4;
+  };
+
+  // 전체 통계
+  const overallStats = useMemo(() => {
+    let totalDone = 0, totalTarget = 0, perfectDays = 0, studyDays = 0, streakCur = 0, streakBest = 0;
+    const today_date = pd(today);
+    const allDatesArr = daysBtw(config.startDate, today).filter(d => pd(d) <= today_date);
+    
+    let currentStreak = 0;
+    for (let i = allDatesArr.length - 1; i >= 0; i--) {
+      const ds = allDatesArr[i];
+      const d = achievements[ds];
+      if (!d) continue;
+      if (d.total === 0) continue; // 할 일 없던 날은 스트릭 끊지 않음
+      studyDays++;
+      totalDone += d.done;
+      totalTarget += d.total;
+      if (d.done >= d.total) perfectDays++;
+      
+      if (d.doneOnDate > 0 || d.done >= d.total) {
+        currentStreak++;
+        streakBest = Math.max(streakBest, currentStreak);
+      } else {
+        if (i === allDatesArr.length - 1) {
+          // 오늘 아직 안 했으면 스트릭 유지
+        } else {
+          currentStreak = 0;
+        }
+      }
+    }
+    
+    // 현재 스트릭 다시 계산 (오늘부터 역순)
+    let s = 0;
+    for (let i = allDatesArr.length - 1; i >= 0; i--) {
+      const ds = allDatesArr[i];
+      const d = achievements[ds];
+      if (!d || d.total === 0) continue;
+      if (d.done >= d.total || d.doneOnDate > 0) {
+        s++;
+      } else {
+        if (i === allDatesArr.length - 1) continue;
+        break;
+      }
+    }
+    streakCur = s;
+    
+    return { totalDone, totalTarget, perfectDays, studyDays, streakCur, streakBest };
+  }, [achievements, today, config]);
+
+  // 과목별 누적 통계
+  const subjectTotals = useMemo(() => {
+    const m = {};
+    for (const [tid, v] of Object.entries(checked)) {
+      const val = getVal(v);
+      if (val <= 0) continue;
+      const [cid, td] = tid.split(':');
+      const course = courses.find(c => c.id === cid);
+      if (!course) continue;
+      if (!m[course.subject]) m[course.subject] = 0;
+      m[course.subject] += val;
+    }
+    return m;
+  }, [checked, courses]);
+
+  // 달력 렌더
+  const allDates = daysBtw(config.startDate, config.endDate);
+  const startDow = pd(config.startDate).getDay();
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (const ds of allDates) cells.push(ds);
+  
+  // 주별로 그룹
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    weeks.push(cells.slice(i, i + 7));
+  }
+  
+  const DOW = ['일','월','화','수','목','금','토'];
+  
+  const today_date = pd(today);
+  const startDate = pd(config.startDate);
+  const daysSinceStart = Math.max(1, Math.min(Math.floor((today_date - startDate) / 86400000) + 1, allDates.length));
+  const pct = overallStats.totalTarget ? Math.round(overallStats.totalDone/overallStats.totalTarget*100) : 0;
+
+  return (
+    <>
+      {/* 상단 트로피 카드 */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 rounded-2xl p-5 text-white shadow-lg mb-4">
+        <div className="absolute top-0 right-0 opacity-10">
+          <Trophy className="w-32 h-32" />
+        </div>
+        <div className="relative">
+          <div className="flex items-center gap-2 mb-1">
+            <Trophy className="w-5 h-5" />
+            <h2 className="text-sm font-bold uppercase tracking-wider">Your Journey</h2>
+          </div>
+          <div className="text-4xl font-black tabular-nums mb-1">{pct}%</div>
+          <div className="text-xs opacity-90 tabular-nums">
+            {overallStats.totalDone} / {overallStats.totalTarget} 과업 완료 · {daysSinceStart}일차
+          </div>
+        </div>
+      </div>
+
+      {/* 주요 통계 3개 */}
+      <div className="grid grid-cols-3 gap-2 mb-5">
+        <StatCard 
+          icon={<Flame className="w-4 h-4" />} 
+          label="현재 연속" 
+          value={overallStats.streakCur} 
+          unit="일" 
+          color="bg-gradient-to-br from-rose-500 to-orange-500"
+        />
+        <StatCard 
+          icon={<Award className="w-4 h-4" />} 
+          label="최장 연속" 
+          value={overallStats.streakBest} 
+          unit="일" 
+          color="bg-gradient-to-br from-amber-500 to-yellow-500"
+        />
+        <StatCard 
+          icon={<Check className="w-4 h-4" />} 
+          label="완벽한 날" 
+          value={overallStats.perfectDays} 
+          unit="일" 
+          color="bg-gradient-to-br from-emerald-500 to-teal-500"
+        />
+      </div>
+
+      {/* 히트맵 (GitHub 잔디밭 스타일) */}
+      <section className="bg-white rounded-2xl border border-stone-200 shadow-sm p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-bold text-stone-800">📅 달성 히트맵</h3>
+            <p className="text-[10px] text-stone-500 mt-0.5">진하게 물든 날 = 많이 해낸 날</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] text-stone-400">적음</span>
+            {[0,1,2,3,4].map(i => (
+              <div key={i} className={`w-2.5 h-2.5 rounded-sm ${
+                i === 0 ? 'bg-stone-100' :
+                i === 1 ? 'bg-emerald-200' :
+                i === 2 ? 'bg-emerald-400' :
+                i === 3 ? 'bg-emerald-600' : 'bg-emerald-800'
+              }`}></div>
+            ))}
+            <span className="text-[9px] text-stone-400">많음</span>
+          </div>
+        </div>
+        
+        <div className="overflow-x-auto -mx-2 px-2">
+          <div className="inline-flex gap-0.5 pb-1">
+            {/* 요일 라벨 */}
+            <div className="flex flex-col gap-0.5 pr-1 pt-3">
+              {DOW.map((d, i) => (
+                <div key={d} className="w-3 h-3 flex items-center justify-center text-[8px] text-stone-400">
+                  {i % 2 === 1 ? d : ''}
+                </div>
+              ))}
+            </div>
+            {/* 주별 셀 */}
+            {weeks.map((week, wi) => {
+              // 첫날 라벨용
+              const firstDs = week.find(d => d);
+              const showMonth = firstDs && (wi === 0 || (week[0] && Number(week[0].slice(8)) <= 7));
+              return (
+                <div key={wi} className="flex flex-col gap-0.5">
+                  <div className="h-2.5 text-[8px] text-stone-400 tabular-nums">
+                    {showMonth && firstDs ? `${Number(firstDs.slice(5,7))}월` : ''}
+                  </div>
+                  {DOW.map((_, di) => {
+                    const ds = week[di];
+                    if (!ds) return <div key={di} className="w-3 h-3"></div>;
+                    const intensity = getIntensity(ds);
+                    const isToday = ds === today;
+                    const isFuture = pd(ds) > today_date;
+                    const isHoliday = config.holidays.includes(ds);
+                    const a = achievements[ds];
+                    
+                    let bg = 'bg-stone-100';
+                    if (isFuture) bg = 'bg-stone-50';
+                    else if (isHoliday) bg = 'bg-amber-100';
+                    else if (intensity === 1) bg = 'bg-emerald-200';
+                    else if (intensity === 2) bg = 'bg-emerald-400';
+                    else if (intensity === 3) bg = 'bg-emerald-600';
+                    else if (intensity === 4) bg = 'bg-emerald-800';
+                    
+                    return (
+                      <div key={di} 
+                        className={`heat-cell w-3 h-3 rounded-sm ${bg} ${isToday ? 'ring-2 ring-rose-400 ring-offset-1' : ''}`}
+                        title={`${ds}${a ? ` · ${a.doneOnDate}개 달성` : ''}`}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* 월별 달력 - 만회 흔적 보이게 */}
+      <MonthCalendar achievements={achievements} config={config} today={today} />
+
+      {/* 과목별 누적 */}
+      {Object.keys(subjectTotals).length > 0 && (
+        <section className="mt-4 bg-white rounded-2xl border border-stone-200 shadow-sm p-4">
+          <h3 className="text-sm font-bold text-stone-800 mb-3">🎯 과목별 누적 달성</h3>
+          <div className="space-y-2">
+            {Object.entries(subjectTotals).sort((a,b) => b[1] - a[1]).map(([sub, cnt]) => {
+              const cfg = getSub(sub);
+              return (
+                <div key={sub} className="flex items-center gap-2">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${cfg.ch} w-20 text-center`}>{sub}</span>
+                  <div className="flex-1 h-6 bg-stone-100 rounded-md overflow-hidden relative">
+                    <div className={`h-full ${cfg.br} transition-all duration-500`} style={{width: `${Math.min(100, cnt / (Math.max(...Object.values(subjectTotals)) || 1) * 100)}%`}} />
+                    <span className="absolute inset-0 flex items-center justify-end pr-2 text-xs font-bold tabular-nums text-stone-700">
+                      {cnt}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* 동기부여 문구 */}
+      <div className="mt-5 text-center">
+        {pct >= 80 ? (
+          <div className="text-base font-bold text-rose-600">🔥 미쳤다 이 페이스! 6모 조져버리자</div>
+        ) : pct >= 50 ? (
+          <div className="text-base font-bold text-amber-600">💪 절반 넘었다! 계속 가자</div>
+        ) : pct >= 20 ? (
+          <div className="text-base font-bold text-emerald-600">🌱 뿌리 내리는 중 · 꾸준히 가자</div>
+        ) : (
+          <div className="text-base font-bold text-stone-600">🎯 시작이 반! 한 걸음씩 ㄱㄱ</div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// 통계 카드
+function StatCard({ icon, label, value, unit, color }) {
+  return (
+    <div className={`${color} rounded-xl p-3 text-white shadow-sm`}>
+      <div className="flex items-center gap-1 mb-1 opacity-90">
+        {icon}
+        <span className="text-[10px] font-bold uppercase tracking-wider">{label}</span>
+      </div>
+      <div className="flex items-baseline gap-1">
+        <span className="text-2xl font-black tabular-nums">{value}</span>
+        <span className="text-xs opacity-80">{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+// 월별 달력 (만회 표시 포함)
+function MonthCalendar({ achievements, config, today }) {
+  const [viewMonth, setViewMonth] = useState(() => {
+    const d = pd(today);
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+  
+  const monthStart = new Date(viewMonth.y, viewMonth.m, 1);
+  const monthEnd = new Date(viewMonth.y, viewMonth.m + 1, 0);
+  const startDOW = monthStart.getDay();
+  const daysInMonth = monthEnd.getDate();
+  
+  const cells = [];
+  for (let i = 0; i < startDOW; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  
+  const DOW = ['일','월','화','수','목','금','토'];
+  const today_date = pd(today);
+  
+  return (
+    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold text-stone-800">🗓️ 월별 달성</h3>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setViewMonth(v => {
+            const d = new Date(v.y, v.m - 1, 1);
+            return { y: d.getFullYear(), m: d.getMonth() };
+          })} className="p-1 hover:bg-stone-100 rounded">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <div className="text-xs font-bold tabular-nums">{viewMonth.y}.{String(viewMonth.m + 1).padStart(2,'0')}</div>
+          <button onClick={() => setViewMonth(v => {
+            const d = new Date(v.y, v.m + 1, 1);
+            return { y: d.getFullYear(), m: d.getMonth() };
+          })} className="p-1 hover:bg-stone-100 rounded">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-7 gap-1 mb-2">
+        {DOW.map((d, i) => (
+          <div key={d} className={`text-center text-[10px] font-bold py-1 ${i===0?'text-rose-500':i===6?'text-sky-500':'text-stone-500'}`}>
+            {d}
+          </div>
+        ))}
+      </div>
+      
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((day, i) => {
+          if (day === null) return <div key={`e${i}`} className="aspect-square"></div>;
+          const ds = fd(new Date(viewMonth.y, viewMonth.m, day));
+          const a = achievements[ds];
+          const isToday = ds === today;
+          const isFuture = pd(ds) > today_date;
+          const isHoliday = config.holidays.includes(ds);
+          const hasData = a && a.total > 0;
+          const perfect = hasData && a.done >= a.total;
+          const pct = hasData ? Math.round(a.done/a.total*100) : 0;
+          const hasMakeup = a && a.doneOnDate > (hasData ? a.total : 0); // 원래 할당량보다 많이 한 날 = 만회
+          const dowIdx = new Date(viewMonth.y, viewMonth.m, day).getDay();
+          
+          return (
+            <div key={ds} className={`aspect-square rounded-lg border relative flex flex-col items-center justify-center text-xs
+              ${isToday ? 'ring-2 ring-rose-400 border-rose-300' : 'border-stone-200'}
+              ${isHoliday ? 'bg-amber-50' : 
+                isFuture ? 'bg-stone-50' :
+                perfect ? 'bg-emerald-100' :
+                pct >= 50 ? 'bg-emerald-50' :
+                pct > 0 ? 'bg-amber-50' :
+                hasData ? 'bg-stone-50' : 'bg-white'}
+            `}>
+              <div className={`font-semibold tabular-nums ${
+                dowIdx === 0 ? 'text-rose-600' : 
+                dowIdx === 6 ? 'text-sky-600' : 
+                'text-stone-700'
+              } ${isFuture ? 'opacity-40' : ''}`}>
+                {day}
+              </div>
+              {hasData && !isFuture && (
+                <div className="text-[8px] tabular-nums font-bold">
+                  {perfect ? '✓' : pct > 0 ? `${pct}%` : ''}
+                </div>
+              )}
+              {hasMakeup && !isFuture && (
+                <div className="absolute -top-0.5 -right-0.5 text-[8px]">🔥</div>
+              )}
+              {isHoliday && <div className="absolute top-0.5 right-0.5 text-[8px]">🏖</div>}
+            </div>
+          );
+        })}
+      </div>
+      
+      <div className="mt-3 flex items-center justify-center gap-3 text-[10px] text-stone-500">
+        <span className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-100 rounded"></div>완료</span>
+        <span className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-50 rounded"></div>50%+</span>
+        <span className="flex items-center gap-1"><div className="w-3 h-3 bg-amber-50 rounded"></div>일부</span>
+        <span className="flex items-center gap-1">🔥 만회</span>
+      </div>
+    </section>
+  );
+}
+
 // ========== DayCard ==========
-function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, onAdjust, onQuickEdit }) {
+function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, onAdjust, onQuickEdit, popTaskId }) {
   const d = schedule[ds];
   if (!d) return null;
   const isT = ds === today;
   const isW = d.wd === '토' || d.wd === '일';
   const isE = d.isExam;
   const dt = d.tasks.reduce((s,t)=>s+t.target,0);
-  const dd = d.tasks.reduce((s,t)=>s+Math.min(checked[t.id]||0,t.target),0);
+  const dd = d.tasks.reduce((s,t)=>s+Math.min(getVal(checked[t.id]),t.target),0);
   const all = dt > 0 && dd >= dt;
 
   return (
@@ -606,9 +1116,8 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
         </div>
       </div>
       <div className="p-3 space-y-2">
-        {d.tasks.map(t => <Task key={t.id} t={t} v={checked[t.id]||0} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} />)}
+        {d.tasks.map(t => <Task key={t.id} t={t} v={getVal(checked[t.id])} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} pop={popTaskId===t.id} />)}
         
-        {/* 오늘 카드 하단에 밀린 과제 */}
         {showMissed && missed.length > 0 && (
           <div className="mt-3 pt-3 border-t-2 border-dashed border-amber-300">
             <div className="flex items-center gap-1.5 mb-2">
@@ -618,7 +1127,7 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
               </span>
             </div>
             <div className="space-y-2">
-              {missed.map(t => <Task key={`m-${t.id}`} t={t} v={checked[t.id]||0} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} isMissed od={t.originalDate} />)}
+              {missed.map(t => <Task key={`m-${t.id}`} t={t} v={getVal(checked[t.id])} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} isMissed od={t.originalDate} pop={popTaskId===t.id} />)}
             </div>
           </div>
         )}
@@ -635,7 +1144,7 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
 }
 
 // ========== Task ==========
-function Task({ t, v, onT, onA, onE, isMissed, od }) {
+function Task({ t, v, onT, onA, onE, pop, isMissed, od }) {
   const cfg = getSub(t.subject);
   const tgt = t.target;
   const isQ = t.type === 'quota' && tgt > 1;
@@ -644,7 +1153,7 @@ function Task({ t, v, onT, onA, onE, isMissed, od }) {
 
   return (
     <div className={`flex items-start gap-2 p-3 rounded-xl ${done?'bg-stone-50 border border-stone-200':`${cfg.bg} border ${cfg.bd}`} ${isMissed&&!done?'ring-1 ring-amber-300':''}`}>
-      <button onClick={onT} className={`flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center mt-0.5 ${done?'bg-emerald-500 border-emerald-500':partial?'bg-amber-100 border-amber-400':`bg-white ${cfg.bd.replace('-200','-400')}`}`}>
+      <button onClick={onT} className={`flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center mt-0.5 ${done?'bg-emerald-500 border-emerald-500':partial?'bg-amber-100 border-amber-400':`bg-white ${cfg.bd.replace('-200','-400')}`} ${pop?'check-pop':''}`}>
         {done && <Check className="w-4 h-4 text-white" />}
         {partial && !done && <div className="w-2.5 h-2.5 bg-amber-500 rounded-sm" />}
       </button>
@@ -733,7 +1242,7 @@ function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg 
       <section className="mb-4 bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-sm">
         <button onClick={()=>setCO(!cO)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-stone-50">
           <div className="flex items-center gap-2"><Target className="w-4 h-4 text-stone-600" /><span className="text-sm font-bold text-stone-700">시험·기간 설정</span></div>
-          <ChevronRight className={`w-4 h-4 text-stone-400 ${cO?'rotate-90':''}`} />
+          <ChevronRight className={`w-4 h-4 text-stone-400 transition-transform ${cO?'rotate-90':''}`} />
         </button>
         {cO && (
           <div className="px-4 pb-4 pt-1 space-y-2">
@@ -758,7 +1267,7 @@ function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg 
       <section className="mb-4 bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-sm">
         <button onClick={()=>setHO(!hO)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-stone-50">
           <div className="flex items-center gap-2"><CalOff className="w-4 h-4 text-stone-600" /><span className="text-sm font-bold text-stone-700">휴일 관리 ({config.holidays.length})</span></div>
-          <ChevronRight className={`w-4 h-4 text-stone-400 ${hO?'rotate-90':''}`} />
+          <ChevronRight className={`w-4 h-4 text-stone-400 transition-transform ${hO?'rotate-90':''}`} />
         </button>
         {hO && (
           <div className="px-4 pb-4 pt-1 space-y-2">
@@ -803,13 +1312,15 @@ function CCard({ c, h, cfg, td, onE, onD }) {
   const col = getSub(c.subject);
   const s = cStats(c, h, cfg, td);
   const DOW = ['일','월','화','수','목','금','토'];
+  const typeLabel = c.type==='lesson'?'진도형':c.type==='quota'?'분량형':'단발형';
+  
   return (
     <div className={`bg-white border ${col.bd} rounded-2xl shadow-sm overflow-hidden`}>
       <div className={`px-4 py-3 ${col.bg} border-b ${col.bd} flex items-start justify-between gap-2`}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${col.ch}`}>{c.subject}</span>
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white text-stone-600 border border-stone-200">{c.type==='lesson'?'진도형':'분량형'}</span>
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white text-stone-600 border border-stone-200">{typeLabel}</span>
           </div>
           <div className="text-sm font-bold text-stone-800 truncate">{c.name}</div>
           {c.note && <div className="text-[11px] text-stone-500 mt-0.5">{c.note}</div>}
@@ -820,7 +1331,7 @@ function CCard({ c, h, cfg, td, onE, onD }) {
         </div>
       </div>
       <div className="px-4 py-3 text-xs space-y-1.5">
-        {c.type==='lesson' ? (
+        {c.type==='lesson' && (
           <>
             <div className="flex justify-between"><span className="text-stone-500">진도</span><span className="font-semibold tabular-nums">{c.doneLessons} / {c.totalLessons}{c.unit}</span></div>
             <div className="flex justify-between"><span className="text-stone-500">남은 분량</span><span className="font-semibold tabular-nums">{s.remaining}{c.unit}</span></div>
@@ -832,21 +1343,45 @@ function CCard({ c, h, cfg, td, onE, onD }) {
               </div>
             )}
           </>
-        ) : (
+        )}
+        {c.type==='quota' && (
           <>
             <div className="flex justify-between"><span className="text-stone-500">하루 분량</span><span className="font-semibold tabular-nums">{c.dailyAmount}{c.unit}</span></div>
             <div className="flex justify-between"><span className="text-stone-500">학습일</span><span className="font-semibold tabular-nums">{s.studyDays}일</span></div>
             <div className="flex justify-between"><span className="text-stone-500">총 분량</span><span className="font-semibold tabular-nums">{s.total}{c.unit}</span></div>
           </>
         )}
-        <div className="flex justify-between items-center pt-1">
-          <span className="text-stone-500">요일</span>
-          <div className="flex gap-0.5">
-            {[0,1,2,3,4,5,6].map(d => (
-              <span key={d} className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${c.days.includes(d)?`${col.br} text-white`:'bg-stone-100 text-stone-400'}`}>{DOW[d]}</span>
-            ))}
+        {c.type==='custom' && (
+          <>
+            <div className="flex justify-between"><span className="text-stone-500">예정 횟수</span><span className="font-semibold tabular-nums">{s.scheduled}회</span></div>
+            <div className="flex justify-between"><span className="text-stone-500">앞으로 남은 횟수</span><span className="font-semibold tabular-nums">{s.upcoming}회</span></div>
+            {c.customDates && c.customDates.length > 0 && (
+              <div className="pt-1">
+                <div className="text-stone-500 mb-1">예정일</div>
+                <div className="flex flex-wrap gap-1">
+                  {[...c.customDates].sort().map(d => {
+                    const isPast = pd(d) < pd(td);
+                    return (
+                      <span key={d} className={`text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded ${isPast?'bg-stone-100 text-stone-400 line-through':`${col.ch}`}`}>
+                        {d.slice(5).replace('-','/')}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        {c.type !== 'custom' && (
+          <div className="flex justify-between items-center pt-1">
+            <span className="text-stone-500">요일</span>
+            <div className="flex gap-0.5">
+              {[0,1,2,3,4,5,6].map(d => (
+                <span key={d} className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${c.days.includes(d)?`${col.br} text-white`:'bg-stone-100 text-stone-400'}`}>{DOW[d]}</span>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -854,11 +1389,23 @@ function CCard({ c, h, cfg, td, onE, onD }) {
 
 // ========== 강좌 폼 ==========
 function CourseForm({ course, onSave, onClose, holidays, config, today }) {
-  const [f, setF] = useState(course);
+  const [f, setF] = useState({ ...course, customDates: course.customDates || [] });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
-  const ok = f.name && f.days.length>0 && (f.type==='lesson' ? f.totalLessons>0 && f.targetDate : f.dailyAmount>0);
-  const tmp = f.name ? cStats(f, holidays, config, today) : null;
+  
+  const toggleCustomDate = (ds) => {
+    const cur = f.customDates || [];
+    const next = cur.includes(ds) ? cur.filter(d => d !== ds) : [...cur, ds].sort();
+    up({ customDates: next });
+  };
+  
+  const ok = f.name && (
+    f.type==='lesson' ? f.totalLessons>0 && f.targetDate && f.days?.length>0
+    : f.type==='quota' ? f.dailyAmount>0 && f.days?.length>0
+    : f.type==='custom' ? (f.customDates||[]).length>0
+    : false
+  );
+  const tmp = f.name && f.type!=='custom' && f.days?.length>0 ? cStats(f, holidays, config, today) : null;
   const DOW = ['일','월','화','수','목','금','토'];
 
   return (
@@ -870,7 +1417,7 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
         </div>
         <div className="p-4 space-y-4">
           <Row label="강좌 이름" req>
-            <input type="text" value={f.name} onChange={e=>up({name:e.target.value})} placeholder="예: 수능특강 국어"
+            <input type="text" value={f.name} onChange={e=>up({name:e.target.value})} placeholder="예: 6월 모의고사"
               className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
           </Row>
           <Row label="과목 분류">
@@ -883,18 +1430,22 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
             </div>
           </Row>
           <Row label="타입">
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={()=>up({type:'lesson'})} className={`p-3 rounded-xl border-2 text-left ${f.type==='lesson'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
-                <div className={`flex items-center gap-1.5 mb-0.5 ${f.type==='lesson'?'text-rose-700':'text-stone-600'}`}><Book className="w-4 h-4" /><span className="text-xs font-bold">진도형</span></div>
-                <div className="text-[10px] text-stone-500">총 N강 중 1강씩</div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <button onClick={()=>up({type:'lesson'})} className={`p-2.5 rounded-xl border-2 text-left ${f.type==='lesson'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
+                <div className={`flex items-center gap-1 mb-0.5 ${f.type==='lesson'?'text-rose-700':'text-stone-600'}`}><Book className="w-3.5 h-3.5" /><span className="text-xs font-bold">진도형</span></div>
+                <div className="text-[9px] text-stone-500">총 N강 중 1강씩</div>
               </button>
-              <button onClick={()=>up({type:'quota'})} className={`p-3 rounded-xl border-2 text-left ${f.type==='quota'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
-                <div className={`flex items-center gap-1.5 mb-0.5 ${f.type==='quota'?'text-rose-700':'text-stone-600'}`}><Spark className="w-4 h-4" /><span className="text-xs font-bold">분량형</span></div>
-                <div className="text-[10px] text-stone-500">하루 N개씩 +/-</div>
+              <button onClick={()=>up({type:'quota'})} className={`p-2.5 rounded-xl border-2 text-left ${f.type==='quota'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
+                <div className={`flex items-center gap-1 mb-0.5 ${f.type==='quota'?'text-rose-700':'text-stone-600'}`}><Spark className="w-3.5 h-3.5" /><span className="text-xs font-bold">분량형</span></div>
+                <div className="text-[9px] text-stone-500">하루 N개씩</div>
+              </button>
+              <button onClick={()=>up({type:'custom'})} className={`p-2.5 rounded-xl border-2 text-left ${f.type==='custom'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
+                <div className={`flex items-center gap-1 mb-0.5 ${f.type==='custom'?'text-rose-700':'text-stone-600'}`}><Cal className="w-3.5 h-3.5" /><span className="text-xs font-bold">단발형</span></div>
+                <div className="text-[9px] text-stone-500">원하는 날짜만</div>
               </button>
             </div>
           </Row>
-          {f.type==='lesson' ? (
+          {f.type==='lesson' && (
             <>
               <div className="grid grid-cols-2 gap-2">
                 <Row label="총 분량" req>
@@ -919,7 +1470,8 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
                   className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
               </Row>
             </>
-          ) : (
+          )}
+          {f.type==='quota' && (
             <Row label="하루 분량" req>
               <div className="flex gap-1">
                 <input type="number" min="1" value={f.dailyAmount||''} onChange={e=>up({dailyAmount:Number(e.target.value)})}
@@ -929,18 +1481,41 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
               </div>
             </Row>
           )}
-          <Row label="배치 요일" req>
-            <div className="grid grid-cols-7 gap-1">
-              {DOW.map((n, d) => (
-                <button key={d} onClick={()=>tD(d)} className={`py-2.5 rounded-lg text-xs font-bold ${f.days.includes(d)?'bg-rose-500 text-white':'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}>{n}</button>
-              ))}
-            </div>
-          </Row>
+          
+          {f.type==='custom' && (
+            <Row label="실행 날짜 선택" req>
+              <DatePicker 
+                startDate={config.startDate} 
+                endDate={config.endDate} 
+                holidays={holidays}
+                selected={f.customDates || []} 
+                onToggle={toggleCustomDate} 
+              />
+              <div className="mt-2 text-[11px] text-stone-500">
+                선택됨: <b className="tabular-nums">{(f.customDates||[]).length}개 날짜</b>
+                {(f.customDates||[]).length > 0 && (
+                  <span> · {(f.customDates||[]).sort().map(d => d.slice(5).replace('-','/')).join(', ')}</span>
+                )}
+              </div>
+            </Row>
+          )}
+          
+          {f.type!=='custom' && (
+            <Row label="배치 요일" req>
+              <div className="grid grid-cols-7 gap-1">
+                {DOW.map((n, d) => (
+                  <button key={d} onClick={()=>tD(d)} className={`py-2.5 rounded-lg text-xs font-bold ${f.days?.includes(d)?'bg-rose-500 text-white':'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}>{n}</button>
+                ))}
+              </div>
+            </Row>
+          )}
+          
           <Row label="메모 (선택)">
-            <input type="text" value={f.note||''} onChange={e=>up({note:e.target.value})} placeholder="예: 자투리 시간 활용"
+            <input type="text" value={f.note||''} onChange={e=>up({note:e.target.value})} placeholder="예: 실모 3회차"
               className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
           </Row>
-          {tmp && f.days.length>0 && (
+          
+          {tmp && (
             <div className="bg-gradient-to-br from-stone-50 to-stone-100 border border-stone-200 rounded-xl p-3">
               <div className="flex items-center gap-1.5 mb-2"><Spark className="w-3.5 h-3.5 text-stone-600" /><span className="text-xs font-bold text-stone-700">미리보기</span></div>
               <div className="text-xs space-y-1 text-stone-600">
@@ -963,6 +1538,79 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
           <button onClick={()=>ok && onSave(f)} disabled={!ok}
             className="flex-[2] py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold disabled:bg-stone-300 disabled:cursor-not-allowed">저장</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ========== 날짜 선택 달력 ==========
+function DatePicker({ startDate, endDate, holidays, selected, onToggle }) {
+  const [viewMonth, setViewMonth] = useState(() => {
+    const d = pd(startDate);
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+  
+  const monthStart = new Date(viewMonth.y, viewMonth.m, 1);
+  const monthEnd = new Date(viewMonth.y, viewMonth.m + 1, 0);
+  const startDOW = monthStart.getDay();
+  const daysInMonth = monthEnd.getDate();
+  
+  const prevMonth = () => {
+    const prev = new Date(viewMonth.y, viewMonth.m - 1, 1);
+    setViewMonth({ y: prev.getFullYear(), m: prev.getMonth() });
+  };
+  const nextMonth = () => {
+    const next = new Date(viewMonth.y, viewMonth.m + 1, 1);
+    setViewMonth({ y: next.getFullYear(), m: next.getMonth() });
+  };
+  
+  const cells = [];
+  for (let i = 0; i < startDOW; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  
+  const DOW = ['일','월','화','수','목','금','토'];
+  
+  return (
+    <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 bg-stone-50 border-b border-stone-200">
+        <button type="button" onClick={prevMonth} className="p-1 hover:bg-stone-200 rounded">
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <div className="text-sm font-bold tabular-nums">{viewMonth.y}년 {viewMonth.m + 1}월</div>
+        <button type="button" onClick={nextMonth} className="p-1 hover:bg-stone-200 rounded">
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="grid grid-cols-7 gap-0.5 p-2">
+        {DOW.map((d, i) => (
+          <div key={d} className={`text-center text-[10px] font-bold py-1 ${i===0?'text-rose-500':i===6?'text-sky-500':'text-stone-400'}`}>
+            {d}
+          </div>
+        ))}
+        {cells.map((day, i) => {
+          if (day === null) return <div key={`empty-${i}`}></div>;
+          const ds = fd(new Date(viewMonth.y, viewMonth.m, day));
+          const inRange = ds >= startDate && ds <= endDate;
+          const isHoliday = holidays.includes(ds);
+          const isSelected = selected.includes(ds);
+          const dowIdx = new Date(viewMonth.y, viewMonth.m, day).getDay();
+          
+          return (
+            <button key={ds} type="button" 
+              onClick={() => inRange && onToggle(ds)}
+              disabled={!inRange}
+              className={`aspect-square text-xs font-semibold rounded-md transition-colors ${
+                !inRange ? 'text-stone-300 cursor-not-allowed' :
+                isSelected ? 'bg-rose-500 text-white' :
+                isHoliday ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' :
+                dowIdx === 0 ? 'text-rose-500 hover:bg-rose-50' :
+                dowIdx === 6 ? 'text-sky-500 hover:bg-sky-50' :
+                'text-stone-700 hover:bg-stone-100'
+              }`}>
+              {day}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
