@@ -328,22 +328,47 @@ function App() {
     } catch (e) { console.error(e); }
   }, []);
 
+  // ca 결정 헬퍼
+  // forceToday=true면 무조건 오늘 (만회 섹션에서 체크한 경우)
+  // 아니면 예정일이 오늘 이전이면 예정일, 오늘 이후면 오늘
+  const decideCA = (taskDate, forceToday = false) => {
+    const todayStr = fd(new Date());
+    if (forceToday) return todayStr;
+    return pd(taskDate) < pd(todayStr) ? taskDate : todayStr;
+  };
+
+  // 완료일 바탕으로 DB upsert (updated_at을 완료일 기준으로)
+  const saveCheckDbWithCA = useCallback(async (cid, td, v, ca) => {
+    if (!sb || cid === 'exam' || !isUUID(cid)) return;
+    try {
+      if (v <= 0) {
+        await sb.from('task_checks').delete().eq('course_id', cid).eq('task_date', td);
+      } else {
+        // ca를 ISO datetime으로 (정오 시각 사용, 시간대 문제 회피)
+        const caIso = new Date(ca + 'T12:00:00').toISOString();
+        await sb.from('task_checks').upsert({
+          course_id: cid, task_date: td, achieved: v,
+          updated_at: caIso,
+        });
+      }
+    } catch (e) { console.error(e); }
+  }, []);
+
   // 체크: 완료일(ca) 기록 포함
-  const toggleFull = (t) => {
+  const toggleFull = (t, fromMissed = false) => {
     const [cid, td] = t.id.split(':');
     if (cid === 'exam') return;
-    const today = fd(new Date());
+    const ca = decideCA(td, fromMissed);
     setChecked(prev => {
       const cur = getVal(prev[t.id]);
       const nv = cur >= t.target ? 0 : t.target;
-      saveCheckDb(cid, td, nv);
+      saveCheckDbWithCA(cid, td, nv, ca);
       if (nv === 0) {
         const { [t.id]: _, ...rest } = prev;
         return rest;
       }
-      return { ...prev, [t.id]: { v: nv, ca: today } };
+      return { ...prev, [t.id]: { v: nv, ca } };
     });
-    // 체크(완료)일 때만 팝 애니메이션
     const curVal = getVal(checked[t.id]);
     if (curVal < t.target) {
       setPopTaskId(t.id);
@@ -351,33 +376,33 @@ function App() {
     }
   };
 
-  const adjust = (t, delta) => {
+  const adjust = (t, delta, fromMissed = false) => {
     const [cid, td] = t.id.split(':');
     if (cid === 'exam') return;
-    const today = fd(new Date());
+    const ca = decideCA(td, fromMissed);
     setChecked(prev => {
       const cur = getVal(prev[t.id]);
       const v = Math.max(0, cur + delta);
-      saveCheckDb(cid, td, v);
+      saveCheckDbWithCA(cid, td, v, ca);
       if (v === 0) {
         const { [t.id]: _, ...rest } = prev;
         return rest;
       }
-      return { ...prev, [t.id]: { v, ca: today } };
+      return { ...prev, [t.id]: { v, ca } };
     });
   };
 
-  const setVal = (tid, v) => {
+  const setVal = (tid, v, fromMissed = false) => {
     const [cid, td] = tid.split(':');
     const val = Math.max(0, v);
-    const today = fd(new Date());
+    const ca = decideCA(td, fromMissed);
     setChecked(prev => {
-      saveCheckDb(cid, td, val);
+      saveCheckDbWithCA(cid, td, val, ca);
       if (val === 0) {
         const { [tid]: _, ...rest } = prev;
         return rest;
       }
-      return { ...prev, [tid]: { v: val, ca: today } };
+      return { ...prev, [tid]: { v: val, ca } };
     });
   };
 
@@ -655,7 +680,7 @@ function App() {
       </main>
 
       {editing && <CourseForm course={editing} onSave={saveCourse} onClose={()=>setEditing(null)} holidays={config.holidays} config={config} today={today} />}
-      {quickEdit && <QuickEdit task={quickEdit} cur={getVal(checked[quickEdit.id])} onSet={v=>setVal(quickEdit.id,v)} onClose={()=>setQuickEdit(null)} />}
+      {quickEdit && <QuickEdit task={quickEdit} cur={getVal(checked[quickEdit.id])} onSet={v=>setVal(quickEdit.id,v, quickEdit._fromMissed)} onClose={()=>setQuickEdit(null)} />}
     </div>
   );
 }
@@ -1364,7 +1389,7 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
               </span>
             </div>
             <div className="space-y-2">
-              {missed.map(t => <Task key={`m-${t.id}`} t={t} v={getVal(checked[t.id])} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} isMissed od={t.originalDate} pop={popTaskId===t.id} />)}
+              {missed.map(t => <Task key={`m-${t.id}`} t={t} v={getVal(checked[t.id])} onT={()=>onToggle(t, true)} onA={d=>onAdjust(t,d, true)} onE={()=>onQuickEdit({...t, _fromMissed: true})} isMissed od={t.originalDate} pop={popTaskId===t.id} />)}
             </div>
           </div>
         )}
