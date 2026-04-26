@@ -1,7 +1,7 @@
 {
-  "name": "패찍이 · 공부 계획",
-  "short_name": "패찍이",
-  "description": "수능까지 밀착관리, 패찍하면서 공부하자",
+  "name": "Paechhik Study Planner",
+  "short_name": "Paechhik",
+  "description": "Study planner for college entrance exam preparation",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -23,5 +23,8 @@
       "purpose": "any"
     }
   ],
-  "categories": ["education", "productivity"]
+  "categories": [
+    "education",
+    "productivity"
+  ]
 }
