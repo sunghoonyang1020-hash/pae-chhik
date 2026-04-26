@@ -1964,19 +1964,37 @@ function Row({ label, children, req }) {
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 
-<!-- Service Worker (임시 비활성화 + 기존 SW 강제 제거) -->
+<!-- Service Worker 강제 제거 + 캐시 전부 삭제 (긴급 복구용) -->
 <script>
-  if ('serviceWorker' in navigator) {
-    // 기존에 등록된 SW 모두 제거 (캐시 문제 해결)
-    navigator.serviceWorker.getRegistrations().then(regs => {
-      regs.forEach(r => r.unregister());
-      console.log('[패찍이] 기존 SW 제거 완료');
-    });
-    // 캐시도 다 비움
-    if ('caches' in window) {
-      caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+  (async function() {
+    if ('serviceWorker' in navigator) {
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        let changed = false;
+        for (const r of regs) { 
+          await r.unregister(); 
+          changed = true;
+          console.log('[패찍이] SW 제거:', r.scope);
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          for (const k of keys) { 
+            await caches.delete(k); 
+            changed = true;
+            console.log('[패찍이] 캐시 삭제:', k);
+          }
+        }
+        if (changed) {
+          // SW나 캐시가 있었으면 한 번 더 새로고침해서 깨끗한 상태로
+          const url = new URL(location.href);
+          if (!url.searchParams.has('_clean')) {
+            url.searchParams.set('_clean', '1');
+            location.replace(url.toString());
+          }
+        }
+      } catch(e) { console.error('SW 정리 실패:', e); }
     }
-  }
+  })();
 </script>
 
 </body>
