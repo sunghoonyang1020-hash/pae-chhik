@@ -16,6 +16,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="패찍이" />
 
+<!-- 🐛 임시 디버거 (문제 해결되면 이 두 줄 지움) -->
+<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+<script>eruda.init();</script>
+
 <!-- 임시 디버거 (문제 해결되면 이 줄 지워도 됨) -->
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
@@ -1945,14 +1949,18 @@ function Row({ label, children, req }) {
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 
-<!-- Service Worker 등록 (PWA) -->
+<!-- Service Worker (임시 비활성화 + 기존 SW 강제 제거) -->
 <script>
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js')
-        .then(reg => console.log('[패찍이] SW 등록 완료:', reg.scope))
-        .catch(err => console.error('[패찍이] SW 등록 실패:', err));
+    // 기존에 등록된 SW 모두 제거 (캐시 문제 해결)
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(r => r.unregister());
+      console.log('[패찍이] 기존 SW 제거 완료');
     });
+    // 캐시도 다 비움
+    if ('caches' in window) {
+      caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+    }
   }
 </script>
 
