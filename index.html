@@ -6,41 +6,18 @@
 <title>패찍이 · 공부 계획</title>
 <meta name="theme-color" content="#1c1917" />
 
-<!-- PWA -->
-<link rel="manifest" href="manifest.json" />
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
-<link rel="apple-touch-icon" href="icon-192.png" />
-
-<!-- iOS 홈화면 PWA -->
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="패찍이" />
-
-<!-- 🐛 임시 디버거 (문제 해결되면 이 두 줄 지움) -->
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>eruda.init();</script>
-
-<!-- 임시 디버거 (문제 해결되면 이 줄 지워도 됨) -->
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>eruda.init();</script>
+<!-- 옛날 SW 강제 제거 (PWA 잔재 청소) -->
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+  }
+  if ('caches' in window) {
+    caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+  }
+</script>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
 <script src="https://cdn.tailwindcss.com"></script>
-
-<!-- 🐛 CDN 로드 실패 직접 감지 -->
-<script>
-  window.addEventListener('error', function(e) {
-    if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
-      const msg = `[로드실패] ${e.target.tagName}: ${e.target.src || e.target.href || '?'}`;
-      console.error(msg);
-      const div = document.createElement('div');
-      div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:red;color:white;padding:10px;font-size:11px;z-index:99999;font-family:monospace;word-break:break-all;';
-      div.textContent = msg;
-      document.body && document.body.appendChild(div);
-    }
-  }, true);
-</script>
-
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -55,7 +32,6 @@
   .tabular-nums { font-variant-numeric: tabular-nums; }
   ::-webkit-scrollbar { display: none; }
   
-  /* 체크박스 누를 때 부드러운 반응 (과하지 않게) */
   @keyframes checkPop {
     0% { transform: scale(1); }
     50% { transform: scale(1.15); }
@@ -69,13 +45,8 @@
   }
   .fade-in { animation: fadeIn 0.2s ease-out; }
   
-  /* 히트맵 셀 */
-  .heat-cell {
-    transition: transform 0.1s ease;
-  }
-  .heat-cell:active {
-    transform: scale(1.3);
-  }
+  .heat-cell { transition: transform 0.1s ease; }
+  .heat-cell:active { transform: scale(1.3); }
 </style>
 </head>
 <body>
@@ -83,7 +54,7 @@
 <div id="root"></div>
 
 <!-- ============================================
-     Supabase 설정 - 여기 두 줄만 수정하면 돼!
+     Supabase 설정
      ============================================ -->
 <script>
   window.SUPABASE_URL = "https://ipjoxlkrfwjvyorerjhf.supabase.co";
@@ -1962,39 +1933,6 @@ function Row({ label, children, req }) {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-</script>
-
-<!-- Service Worker 강제 제거 + 캐시 전부 삭제 (긴급 복구용) -->
-<script>
-  (async function() {
-    if ('serviceWorker' in navigator) {
-      try {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        let changed = false;
-        for (const r of regs) { 
-          await r.unregister(); 
-          changed = true;
-          console.log('[패찍이] SW 제거:', r.scope);
-        }
-        if ('caches' in window) {
-          const keys = await caches.keys();
-          for (const k of keys) { 
-            await caches.delete(k); 
-            changed = true;
-            console.log('[패찍이] 캐시 삭제:', k);
-          }
-        }
-        if (changed) {
-          // SW나 캐시가 있었으면 한 번 더 새로고침해서 깨끗한 상태로
-          const url = new URL(location.href);
-          if (!url.searchParams.has('_clean')) {
-            url.searchParams.set('_clean', '1');
-            location.replace(url.toString());
-          }
-        }
-      } catch(e) { console.error('SW 정리 실패:', e); }
-    }
-  })();
 </script>
 
 </body>
