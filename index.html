@@ -6,16 +6,6 @@
 <title>패찍이 · 공부 계획</title>
 <meta name="theme-color" content="#1c1917" />
 
-<!-- 옛날 SW 강제 제거 (PWA 잔재 청소) -->
-<script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
-  }
-  if ('caches' in window) {
-    caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
-  }
-</script>
-
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -32,6 +22,7 @@
   .tabular-nums { font-variant-numeric: tabular-nums; }
   ::-webkit-scrollbar { display: none; }
   
+  /* 체크박스 누를 때 부드러운 반응 (과하지 않게) */
   @keyframes checkPop {
     0% { transform: scale(1); }
     50% { transform: scale(1.15); }
@@ -45,8 +36,13 @@
   }
   .fade-in { animation: fadeIn 0.2s ease-out; }
   
-  .heat-cell { transition: transform 0.1s ease; }
-  .heat-cell:active { transform: scale(1.3); }
+  /* 히트맵 셀 */
+  .heat-cell {
+    transition: transform 0.1s ease;
+  }
+  .heat-cell:active {
+    transform: scale(1.3);
+  }
 </style>
 </head>
 <body>
@@ -54,14 +50,14 @@
 <div id="root"></div>
 
 <!-- ============================================
-     Supabase 설정
+     Supabase 설정 - 여기 두 줄만 수정하면 돼!
      ============================================ -->
 <script>
   window.SUPABASE_URL = "https://ipjoxlkrfwjvyorerjhf.supabase.co";
   window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwam94bGtyZndqdnlvcmVyamhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDA3MjUsImV4cCI6MjA5MjE3NjcyNX0.fdkM6gWCSZw5oO6JiesNnY9jDqRBGDJ9r2joUR0OJqM";
 </script>
 
-<script type="text/babel">
+<script type="text/babel" data-type="module">
 const { useState, useEffect, useMemo, useCallback } = React;
 
 // ========== Supabase 연결 ==========
@@ -194,31 +190,10 @@ function buildSchedule(courses, holidays, config) {
       const tid = `${c.id}:${ds}`;
       let text, target;
       if (c.type === 'lesson') {
-        const perDay = c.dailyAmount || 1; // 하루 N강 (기본 1)
-        const startLesson = p + 1;
-        p += perDay;
-        target = perDay;
-        const remaining = (c.totalLessons || 0) - (startLesson - 1);
-        if (remaining <= 0) {
-          // 이미 다 끝남 → 완강 후 텍스트
-          if (c.postCompleteText) { 
-            text = `${c.name} · ${c.postCompleteText}`;
-            target = 1;
-          } else continue;
-        } else if (remaining < perDay) {
-          // 마지막 부분 (남은 분량 < 하루 분량)
-          const endLesson = startLesson + remaining - 1;
-          text = startLesson === endLesson 
-            ? `${c.name} ${startLesson}${c.unit}`
-            : `${c.name} ${startLesson}~${endLesson}${c.unit}`;
-          target = remaining;
-        } else {
-          // 정상 (perDay 만큼)
-          const endLesson = startLesson + perDay - 1;
-          text = startLesson === endLesson 
-            ? `${c.name} ${startLesson}${c.unit}`
-            : `${c.name} ${startLesson}~${endLesson}${c.unit}`;
-        }
+        p++; target = 1;
+        if (p <= (c.totalLessons||0)) text = `${c.name} ${p}${c.unit}`;
+        else if (c.postCompleteText) text = `${c.name} · ${c.postCompleteText}`;
+        else continue;
       } else {
         target = c.dailyAmount || 1;
         text = c.name;
@@ -253,10 +228,8 @@ function cStats(c, holidays, cfg, today) {
   for (const ds of all) { if (holidays.includes(ds)) continue; if (c.days.includes(dow(ds))) sd++; }
   if (c.type === 'lesson') {
     const rem = Math.max(0, (c.totalLessons||0) - (c.doneLessons||0));
-    const perDay = c.dailyAmount || 1;
-    const lessonDaysNeeded = Math.ceil(rem / perDay); // 필요 학습일
     const pace = sd > 0 ? rem/sd : 0;
-    return { studyDays:sd, remaining:rem, pace, feasible: sd >= lessonDaysNeeded, perDay, lessonDaysNeeded };
+    return { studyDays:sd, remaining:rem, pace, feasible:sd >= rem };
   }
   return { studyDays:sd, total:sd * (c.dailyAmount||0) };
 }
@@ -1448,7 +1421,7 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
 function Task({ t, v, onT, onA, onE, pop, isMissed, od }) {
   const cfg = getSub(t.subject);
   const tgt = t.target;
-  const isQ = (t.type === 'quota' || t.type === 'lesson') && tgt > 1;
+  const isQ = t.type === 'quota' && tgt > 1;
   const done = v >= tgt, partial = v > 0 && v < tgt, over = v > tgt;
   const step = tgt >= 100 ? 10 : tgt >= 20 ? 5 : 1;
 
@@ -1636,12 +1609,11 @@ function CCard({ c, h, cfg, td, onE, onD }) {
           <>
             <div className="flex justify-between"><span className="text-stone-500">진도</span><span className="font-semibold tabular-nums">{c.doneLessons} / {c.totalLessons}{c.unit}</span></div>
             <div className="flex justify-between"><span className="text-stone-500">남은 분량</span><span className="font-semibold tabular-nums">{s.remaining}{c.unit}</span></div>
-            <div className="flex justify-between"><span className="text-stone-500">하루 {c.unit}</span><span className="font-semibold tabular-nums">{c.dailyAmount||1}{c.unit}</span></div>
-            <div className="flex justify-between"><span className="text-stone-500">학습일</span><span className="font-semibold tabular-nums">{s.studyDays}일 (필요 {s.lessonDaysNeeded}일)</span></div>
+            <div className="flex justify-between"><span className="text-stone-500">학습일</span><span className="font-semibold tabular-nums">{s.studyDays}일</span></div>
             <div className="flex justify-between"><span className="text-stone-500">완강 목표</span><span className="font-semibold tabular-nums">{c.targetDate}</span></div>
             {!s.feasible && s.remaining>0 && (
               <div className="flex items-center gap-1.5 mt-2 px-2 py-1.5 bg-rose-50 border border-rose-200 rounded-lg">
-                <Warn className="w-3.5 h-3.5 text-rose-600" /><span className="text-[11px] text-rose-700 font-semibold">학습일이 부족함 · 하루 분량 늘려야 함</span>
+                <Warn className="w-3.5 h-3.5 text-rose-600" /><span className="text-[11px] text-rose-700 font-semibold">학습일보다 남은 분량이 많음</span>
               </div>
             )}
           </>
@@ -1763,11 +1735,6 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
                     className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm tabular-nums" />
                 </Row>
               </div>
-              <Row label={`하루 ${f.unit||'강'} 수`}>
-                <input type="number" min="1" value={f.dailyAmount||1} onChange={e=>up({dailyAmount:Math.max(1, Number(e.target.value))})}
-                  className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm tabular-nums" />
-                <div className="text-[10px] text-stone-500 mt-1">기본 1{f.unit||'강'}, 빨리 끝내고 싶으면 2~3 추천</div>
-              </Row>
               <Row label="완강 목표일" req>
                 <input type="date" value={f.targetDate||''} onChange={e=>up({targetDate:e.target.value})}
                   className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
@@ -1830,9 +1797,9 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
                 {f.type==='lesson' ? (
                   <>
                     <div>• 남은 분량 <b className="tabular-nums">{tmp.remaining}{f.unit}</b></div>
-                    <div>• 하루 <b className="tabular-nums">{f.dailyAmount||1}{f.unit}</b>씩 → 필요 학습일 <b className="tabular-nums">{tmp.lessonDaysNeeded}일</b></div>
+                    <div>• 하루 <b className="tabular-nums">{tmp.pace<1?'1'+f.unit+' (여유)':tmp.pace.toFixed(1)+f.unit}</b>씩</div>
                     {!tmp.feasible && tmp.remaining>0 && (
-                      <div className="flex items-center gap-1.5 mt-1.5 text-rose-700 font-semibold"><Warn className="w-3 h-3" />학습일이 부족함! ({tmp.studyDays}일 < {tmp.lessonDaysNeeded}일)</div>
+                      <div className="flex items-center gap-1.5 mt-1.5 text-rose-700 font-semibold"><Warn className="w-3 h-3" />학습일보다 남은 분량이 많음!</div>
                     )}
                   </>
                 ) : <div>• 총 <b className="tabular-nums">{tmp.total}{f.unit}</b> 풀게 됨</div>}
