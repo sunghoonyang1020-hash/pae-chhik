@@ -6,6 +6,13 @@
 <title>패찍이 · 공부 계획</title>
 <meta name="theme-color" content="#1c1917" />
 
+<link rel="manifest" href="./manifest.json" />
+
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="패찍이" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -49,9 +56,6 @@
 
 <div id="root"></div>
 
-<!-- ============================================
-     Supabase 설정 - 여기 두 줄만 수정하면 돼!
-     ============================================ -->
 <script>
   window.SUPABASE_URL = "https://ipjoxlkrfwjvyorerjhf.supabase.co";
   window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwam94bGtyZndqdnlvcmVyamhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDA3MjUsImV4cCI6MjA5MjE3NjcyNX0.fdkM6gWCSZw5oO6JiesNnY9jDqRBGDJ9r2joUR0OJqM";
@@ -125,14 +129,10 @@ const daysBtw = (f, t) => { const o=[]; let c=pd(f); const e=pd(t); while(c<=e){
 const isUUID = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 // ========== checked 값 정규화 ==========
-// checked[taskId]는 숫자(값) 또는 { v: 값, ca: 완료일 } 형태 지원
 const getVal = (c) => typeof c === 'object' && c !== null ? (c.v || 0) : (c || 0);
 const getCA = (c) => typeof c === 'object' && c !== null ? c.ca : null;
 
 // ========== 달성도 정규화 ==========
-// 모든 태스크의 "하루치"를 1로 취급.
-// 진도형 1강 완료 = 1.0, 확통 15/15 = 1.0, 확통 8/15 = 0.53
-// 통계/진도바/히트맵에 쓰임 (UI의 원시 숫자 15/15 표시는 그대로 유지)
 const normDone = (v, target) => {
   if (!target || target <= 0) return 0;
   return Math.min(v, target) / target;
@@ -250,7 +250,6 @@ function App() {
   const [expandedPast, setExpandedPast] = useState(false);
   const [popTaskId, setPopTaskId] = useState(null);
 
-  // 초기 로드
   useEffect(() => {
     (async () => {
       if (!sb) {
@@ -306,7 +305,6 @@ function App() {
         if (chR.data) {
           const m = {};
           for (const r of chR.data) {
-            // updated_at에서 날짜만 추출해서 완료일로 저장
             const ca = r.updated_at ? r.updated_at.slice(0, 10) : r.task_date;
             m[`${r.course_id}:${r.task_date}`] = { v: r.achieved, ca };
           }
@@ -337,23 +335,18 @@ function App() {
     } catch (e) { console.error(e); }
   }, []);
 
-  // ca 결정 헬퍼
-  // forceToday=true면 무조건 오늘 (만회 섹션에서 체크한 경우)
-  // 아니면 예정일이 오늘 이전이면 예정일, 오늘 이후면 오늘
   const decideCA = (taskDate, forceToday = false) => {
     const todayStr = fd(new Date());
     if (forceToday) return todayStr;
     return pd(taskDate) < pd(todayStr) ? taskDate : todayStr;
   };
 
-  // 완료일 바탕으로 DB upsert (updated_at을 완료일 기준으로)
   const saveCheckDbWithCA = useCallback(async (cid, td, v, ca) => {
     if (!sb || cid === 'exam' || !isUUID(cid)) return;
     try {
       if (v <= 0) {
         await sb.from('task_checks').delete().eq('course_id', cid).eq('task_date', td);
       } else {
-        // ca를 ISO datetime으로 (정오 시각 사용, 시간대 문제 회피)
         const caIso = new Date(ca + 'T12:00:00').toISOString();
         await sb.from('task_checks').upsert({
           course_id: cid, task_date: td, achieved: v,
@@ -363,7 +356,6 @@ function App() {
     } catch (e) { console.error(e); }
   }, []);
 
-  // 체크: 완료일(ca) 기록 포함
   const toggleFull = (t, fromMissed = false) => {
     const [cid, td] = t.id.split(':');
     if (cid === 'exam') return;
@@ -474,7 +466,6 @@ function App() {
   const allDates = useMemo(() => Object.keys(schedule).sort(), [schedule]);
   const wd = useMemo(() => weekDates(anchor), [anchor]);
 
-  // 만회: 진도형/단발형만 (분량형, exam 제외)
   const missed = useMemo(() => {
     const out = [];
     for (const ds of allDates) {
@@ -483,8 +474,8 @@ function App() {
       if (!d || d.isHoliday) continue;
       for (const t of d.tasks) {
         if (!t.carryable) continue;
-        if (t.type === 'quota') continue; // 분량형 제외
-        if (t.type === 'custom') continue; // 단발형 제외
+        if (t.type === 'quota') continue; 
+        if (t.type === 'custom') continue; 
         if (t.courseId === 'exam') continue;
         const v = getVal(checked[t.id]);
         if (v < t.target) out.push({ ...t, originalDate: ds });
@@ -494,7 +485,6 @@ function App() {
   }, [schedule, checked, today, allDates]);
 
   const stats = useMemo(() => {
-    // 모든 태스크를 "1개 = 1"로 정규화. 분량형도 15문제 완료 = 1, 8/15 = 0.53
     let total = 0, done = 0;
     const bySub = {};
     for (const ds of allDates) {
@@ -697,25 +687,21 @@ function App() {
 
 // ========== 🏆 달성 달력 (성취감 대시보드) ==========
 function Achievement({ courses, checked, config, today, schedule }) {
-  // 각 날짜별 달성량 집계 (ca = 실제 완료일 기준)
-  // ❗ 모든 태스크를 "1개 = 1"로 정규화해서 집계
   const achievements = useMemo(() => {
     const byDate = {};
     const allDates = daysBtw(config.startDate, config.endDate);
     
-    // 1. 각 예정 날짜의 총 목표 = 태스크 개수
     for (const ds of allDates) {
       const day = schedule[ds];
       if (!day) continue;
       byDate[ds] = { total: 0, done: 0, doneOnDate: 0, tasks: [] };
       for (const t of day.tasks) {
         if (t.courseId === 'exam') continue;
-        byDate[ds].total += 1; // 태스크 하나 = 목표 1
+        byDate[ds].total += 1; 
         byDate[ds].tasks.push(t);
       }
     }
     
-    // 2. 체크된 것들을 정규화해서 기록
     for (const [tid, v] of Object.entries(checked)) {
       const val = getVal(v);
       const ca = getCA(v);
@@ -729,15 +715,12 @@ function Achievement({ courses, checked, config, today, schedule }) {
         const t = schedule[td].tasks.find(x => x.id === tid);
         if (t) taskTarget = t.target;
       }
-      // 0~1 사이의 정규화된 달성도
       const doneAmount = normDone(val, taskTarget);
       
-      // 예정일의 done 증가 (할당량 대비 달성률)
       if (byDate[td]) {
         byDate[td].done += doneAmount;
       }
       
-      // 실제 완료일 기록 (만회한 날 집계용)
       if (ca && ca !== td && byDate[ca]) {
         byDate[ca].doneOnDate += doneAmount;
       } else if (byDate[td]) {
@@ -748,18 +731,15 @@ function Achievement({ courses, checked, config, today, schedule }) {
     return byDate;
   }, [checked, schedule, config]);
 
-  // 달성 강도 (0~4): GitHub 잔디밭 스타일
   const getIntensity = (ds) => {
     const d = achievements[ds];
     if (!d || d.doneOnDate < 0.1) return 0;
-    // 달성한 태스크 개수 기준
     if (d.doneOnDate < 2) return 1;
     if (d.doneOnDate < 4) return 2;
     if (d.doneOnDate < 6) return 3;
     return 4;
   };
 
-  // 전체 통계
   const overallStats = useMemo(() => {
     let totalDone = 0, totalTarget = 0, perfectDays = 0, studyDays = 0, streakCur = 0, streakBest = 0;
     const today_date = pd(today);
@@ -781,14 +761,12 @@ function Achievement({ courses, checked, config, today, schedule }) {
         streakBest = Math.max(streakBest, currentStreak);
       } else {
         if (i === allDatesArr.length - 1) {
-          // 오늘 아직 안 했으면 스트릭 유지
         } else {
           currentStreak = 0;
         }
       }
     }
     
-    // 현재 스트릭 다시 계산 (오늘부터 역순)
     let s = 0;
     for (let i = allDatesArr.length - 1; i >= 0; i--) {
       const ds = allDatesArr[i];
@@ -806,7 +784,6 @@ function Achievement({ courses, checked, config, today, schedule }) {
     return { totalDone, totalTarget, perfectDays, studyDays, streakCur, streakBest };
   }, [achievements, today, config]);
 
-  // 과목별 누적 통계
   const subjectTotals = useMemo(() => {
     const m = {};
     for (const [tid, v] of Object.entries(checked)) {
@@ -821,14 +798,12 @@ function Achievement({ courses, checked, config, today, schedule }) {
     return m;
   }, [checked, courses]);
 
-  // 달력 렌더
   const allDates = daysBtw(config.startDate, config.endDate);
   const startDow = pd(config.startDate).getDay();
   const cells = [];
   for (let i = 0; i < startDow; i++) cells.push(null);
   for (const ds of allDates) cells.push(ds);
   
-  // 주별로 그룹
   const weeks = [];
   for (let i = 0; i < cells.length; i += 7) {
     weeks.push(cells.slice(i, i + 7));
@@ -843,7 +818,6 @@ function Achievement({ courses, checked, config, today, schedule }) {
 
   return (
     <>
-      {/* 상단 트로피 카드 */}
       <div className="relative overflow-hidden bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 rounded-2xl p-5 text-white shadow-lg mb-4">
         <div className="absolute top-0 right-0 opacity-10">
           <Trophy className="w-32 h-32" />
@@ -860,7 +834,6 @@ function Achievement({ courses, checked, config, today, schedule }) {
         </div>
       </div>
 
-      {/* 주요 통계 3개 */}
       <div className="grid grid-cols-3 gap-2 mb-5">
         <StatCard 
           icon={<Flame className="w-4 h-4" />} 
@@ -885,7 +858,6 @@ function Achievement({ courses, checked, config, today, schedule }) {
         />
       </div>
 
-      {/* 히트맵 (GitHub 잔디밭 스타일) */}
       <section className="bg-white rounded-2xl border border-stone-200 shadow-sm p-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -908,7 +880,6 @@ function Achievement({ courses, checked, config, today, schedule }) {
         
         <div className="overflow-x-auto -mx-2 px-2">
           <div className="inline-flex gap-0.5 pb-1">
-            {/* 요일 라벨 */}
             <div className="flex flex-col gap-0.5 pr-1 pt-3">
               {DOW.map((d, i) => (
                 <div key={d} className="w-3 h-3 flex items-center justify-center text-[8px] text-stone-400">
@@ -916,9 +887,7 @@ function Achievement({ courses, checked, config, today, schedule }) {
                 </div>
               ))}
             </div>
-            {/* 주별 셀 */}
             {weeks.map((week, wi) => {
-              // 첫날 라벨용
               const firstDs = week.find(d => d);
               const showMonth = firstDs && (wi === 0 || (week[0] && Number(week[0].slice(8)) <= 7));
               return (
@@ -957,10 +926,8 @@ function Achievement({ courses, checked, config, today, schedule }) {
         </div>
       </section>
 
-      {/* 월별 달력 - 만회 흔적 보이게 */}
       <MonthCalendar achievements={achievements} config={config} today={today} checked={checked} courses={courses} schedule={schedule} />
 
-      {/* 과목별 누적 */}
       {Object.keys(subjectTotals).length > 0 && (
         <section className="mt-4 bg-white rounded-2xl border border-stone-200 shadow-sm p-4">
           <h3 className="text-sm font-bold text-stone-800 mb-3">🎯 과목별 누적 달성</h3>
@@ -983,7 +950,6 @@ function Achievement({ courses, checked, config, today, schedule }) {
         </section>
       )}
 
-      {/* 동기부여 문구 */}
       <div className="mt-5 text-center">
         {pct >= 80 ? (
           <div className="text-base font-bold text-rose-600">🔥 미쳤다 이 페이스! 6모 조져버리자</div>
@@ -999,7 +965,6 @@ function Achievement({ courses, checked, config, today, schedule }) {
   );
 }
 
-// 통계 카드
 function StatCard({ icon, label, value, unit, color }) {
   return (
     <div className={`${color} rounded-xl p-3 text-white shadow-sm`}>
@@ -1015,7 +980,6 @@ function StatCard({ icon, label, value, unit, color }) {
   );
 }
 
-// 월별 달력 (만회 표시 포함)
 function MonthCalendar({ achievements, config, today, checked, courses, schedule }) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = pd(today);
@@ -1080,7 +1044,7 @@ function MonthCalendar({ achievements, config, today, checked, courses, schedule
           const pct = hasData ? Math.round(a.done/a.total*100) : 0;
           const hasMakeup = a && a.doneOnDate > (hasData ? a.total : 0.001) + 0.001;
           const dowIdx = new Date(viewMonth.y, viewMonth.m, day).getDay();
-          const clickable = !isFuture; // 미래 날짜는 클릭 안 됨
+          const clickable = !isFuture; 
           
           return (
             <button key={ds} 
@@ -1136,29 +1100,25 @@ function MonthCalendar({ achievements, config, today, checked, courses, schedule
   );
 }
 
-// ========== 날짜 상세 모달 ==========
 function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
   const day = schedule[date];
   const isHoliday = config.holidays.includes(date);
   const wd = dowN(date);
   
-  // 이 날짜의 모든 예정 태스크
   const scheduledTasks = day ? day.tasks.filter(t => t.courseId !== 'exam') : [];
   
-  // 예정 태스크별 달성도
   const scheduledResults = scheduledTasks.map(t => {
     const v = getVal(checked[t.id]);
     const ca = getCA(checked[t.id]);
     return {
       ...t,
       achieved: v,
-      completedAt: ca, // 실제 완료일
+      completedAt: ca,
       status: v >= t.target ? 'done' : v > 0 ? 'partial' : 'missed',
-      doneOnDate: !ca || ca === date, // 예정일에 완료했는지
+      doneOnDate: !ca || ca === date, 
     };
   });
   
-  // 이 날짜에 "실제로" 완료된 모든 태스크 (다른 날 예정이었다가 이 날 만회한 것 포함)
   const completedOnThisDate = [];
   for (const [tid, v] of Object.entries(checked)) {
     const val = getVal(v);
@@ -1167,13 +1127,10 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
     const [cid, td] = tid.split(':');
     if (cid === 'exam') continue;
     
-    // 이 날짜가 실제 완료일인 경우
     if (ca === date && td !== date) {
-      // 다른 날 예정이었는데 이 날 완료한 것
       const course = courses.find(c => c.id === cid);
       if (!course) continue;
       
-      // 해당 task 정보 찾기
       let taskText = course.name;
       let taskTarget = 1;
       let taskUnit = course.unit || '';
@@ -1194,13 +1151,13 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
         target: taskTarget,
         unit: taskUnit,
         achieved: val,
-        originalDate: td, // 원래 예정일
+        originalDate: td, 
         type: course.type,
       });
     }
   }
   
-  const totalTarget = scheduledTasks.length; // 태스크 개수 기준
+  const totalTarget = scheduledTasks.length; 
   const totalDone = scheduledTasks.reduce((s,t) => s + normDone(getVal(checked[t.id]), t.target), 0);
   const pct = totalTarget > 0 ? Math.round(totalDone / totalTarget * 100) : 0;
   
@@ -1209,7 +1166,6 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 fade-in" onClick={onClose}>
       <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e=>e.stopPropagation()}>
-        {/* 헤더 */}
         <div className="sticky top-0 bg-white border-b border-stone-200 px-4 py-3 flex items-center justify-between z-10">
           <div>
             <h3 className="text-base font-bold">{dateLabel}</h3>
@@ -1219,7 +1175,6 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
         </div>
         
         <div className="p-4 space-y-4">
-          {/* 휴일 */}
           {isHoliday && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
               <div className="text-3xl mb-1">🏖️</div>
@@ -1227,7 +1182,6 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
             </div>
           )}
           
-          {/* 달성률 요약 */}
           {!isHoliday && totalTarget > 0 && (
             <div className={`rounded-2xl p-4 ${
               pct === 100 ? 'bg-gradient-to-br from-emerald-500 to-teal-500 text-white' :
@@ -1251,7 +1205,6 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
             </div>
           )}
           
-          {/* 예정된 과제 */}
           {scheduledTasks.length > 0 && (
             <div>
               <div className="flex items-center gap-1.5 mb-2">
@@ -1304,7 +1257,6 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
             </div>
           )}
           
-          {/* 이 날 만회한 것 (다른 날 예정이었다가 이 날 완료) */}
           {completedOnThisDate.length > 0 && (
             <div>
               <div className="flex items-center gap-1.5 mb-2">
@@ -1338,7 +1290,6 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
             </div>
           )}
           
-          {/* 아무것도 없을 때 */}
           {!isHoliday && scheduledTasks.length === 0 && completedOnThisDate.length === 0 && (
             <div className="text-center py-8 text-stone-400">
               <div className="text-3xl mb-2">😴</div>
@@ -1355,17 +1306,15 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
   );
 }
 
-// ========== DayCard ==========
 function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, onAdjust, onQuickEdit, popTaskId }) {
   const d = schedule[ds];
   if (!d) return null;
   const isT = ds === today;
   const isW = d.wd === '토' || d.wd === '일';
   const isE = d.isExam;
-  // 하루치 진도 (태스크 개수 기준, 분량형은 비율로)
   const dt = d.tasks.length;
   const dd = d.tasks.reduce((s,t) => s + normDone(getVal(checked[t.id]), t.target), 0);
-  const all = dt > 0 && dd >= dt - 0.001; // 부동소수 오차 방지
+  const all = dt > 0 && dd >= dt - 0.001; 
 
   return (
     <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${isT?'border-rose-400 ring-2 ring-rose-200':'border-stone-200'} ${isE?'bg-gradient-to-br from-rose-50 via-white to-amber-50':''}`}>
@@ -1417,7 +1366,6 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
   );
 }
 
-// ========== Task ==========
 function Task({ t, v, onT, onA, onE, pop, isMissed, od }) {
   const cfg = getSub(t.subject);
   const tgt = t.target;
@@ -1461,7 +1409,6 @@ function Task({ t, v, onT, onA, onE, pop, isMissed, od }) {
   );
 }
 
-// ========== QuickEdit ==========
 function QuickEdit({ task, cur, onSet, onClose }) {
   const [inp, setInp] = useState(String(cur));
   const cfg = getSub(task.subject);
@@ -1505,7 +1452,6 @@ function QuickEdit({ task, cur, onSet, onClose }) {
   );
 }
 
-// ========== 강좌 뷰 ==========
 function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg }) {
   const [cO, setCO] = useState(false);
   const [hO, setHO] = useState(false);
@@ -1661,7 +1607,6 @@ function CCard({ c, h, cfg, td, onE, onD }) {
   );
 }
 
-// ========== 강좌 폼 ==========
 function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [] });
   const up = (p) => setF(v => ({...v, ...p}));
@@ -1817,7 +1762,6 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   );
 }
 
-// ========== 날짜 선택 달력 ==========
 function DatePicker({ startDate, endDate, holidays, selected, onToggle }) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = pd(startDate);
@@ -1902,5 +1846,19 @@ function Row({ label, children, req }) {
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(registration => {
+          console.log('PWA 백그라운드 구동 준비 완료 (범위:', registration.scope, ')');
+        })
+        .catch(error => {
+          console.error('PWA 서비스 워커 등록 실패:', error);
+        });
+    });
+  }
+</script>
+
 </body>
-  </html>
+</html>
