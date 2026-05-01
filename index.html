@@ -584,7 +584,6 @@ function App() {
   };
 
   const schedule = useMemo(() => buildSchedule(courses, config.holidays, config, checked), [courses, config, checked]);
-  const allDates = useMemo(() => Object.keys(schedule).sort(), [schedule]);
   const wd = useMemo(() => weekDates(anchor), [anchor]);
 
   // 활성 시험 객체 + 날짜
@@ -595,6 +594,12 @@ function App() {
     if (m) return { ...m, isFinal: false };
     return { id: 'final', name: config.examName, date: config.endDate, isFinal: true };
   }, [config]);
+  
+  // 캘린더 표시 범위 = 활성 시험까지
+  const allDates = useMemo(() => 
+    Object.keys(schedule).filter(ds => ds <= activeExam.date).sort(), 
+    [schedule, activeExam]
+  );
   
   const allExams = useMemo(() => {
     return [
@@ -2214,7 +2219,7 @@ function AuthScreen() {
           {mode === 'signup' && (
             <div>
               <label className="block text-[11px] font-bold text-stone-600 mb-1">이름 (캘린더에 표시될 이름)</label>
-              <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="예: 양성훈"
+              <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="예: 홍길동"
                 className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
             </div>
           )}
