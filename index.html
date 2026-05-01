@@ -134,7 +134,9 @@ const DEFAULT_CONFIG = {
   holidays:['2026-05-04','2026-05-05'],
   milestones: [
     { id:'m-6mo', name:'6월 모의고사', date:'2026-06-04' },
+    { id:'m-9mo', name:'9월 모의평가', date:'2026-09-03' },
   ],
+  activeExamId: 'final',
 };
 const DEFAULT_COURSES = [
   { name:'매3비', subject:'국어', type:'lesson', totalLessons:30, doneLessons:7, lessonsPerDay:1, unit:'강', targetDate:'2026-06-02', days:[1,2,3,4], postCompleteText:'기출 1회', sortOrder:1 },
@@ -156,9 +158,11 @@ const toDb = (c) => ({ name:c.name, subject:c.subject, type:c.type, total_lesson
 function buildSchedule(courses, holidays, config, checked) {
   const s = {};
   const all = daysBtw(config.startDate, config.endDate);
+  const milestoneDates = new Set((config.milestones || []).map(m => m.date));
   for (const ds of all) {
     const isH = holidays.includes(ds);
-    s[ds] = { wd:dowN(ds), special: isH?'🏖️ 휴일 · 전면 휴식':null, tasks:[], isHoliday:isH };
+    const isMileDay = milestoneDates.has(ds) && ds !== config.endDate;
+    s[ds] = { wd:dowN(ds), special: isH?'🏖️ 휴일 · 전면 휴식':null, tasks:[], isHoliday:isH, isMileDay };
   }
   const sorted = [...courses].sort((a,b) => (a.sortOrder??99)-(b.sortOrder??99));
   
@@ -167,7 +171,7 @@ function buildSchedule(courses, holidays, config, checked) {
       const dates = c.customDates || [];
       for (const ds of dates) {
         if (!s[ds]) continue;
-        if (s[ds].isHoliday) continue;
+        if (s[ds].isHoliday || s[ds].isMileDay) continue;
         const tid = `${c.id}:${ds}`;
         s[ds].tasks.push({ 
           id:tid, courseId:c.id, subject:c.subject, 
@@ -184,7 +188,7 @@ function buildSchedule(courses, holidays, config, checked) {
       let currentLesson = c.doneLessons || 0;
       
       for (const ds of all) {
-        if (s[ds].isHoliday) continue;
+        if (s[ds].isHoliday || s[ds].isMileDay) continue;
         if (!c.days.includes(dow(ds))) continue;
         
         const tid = `${c.id}:${ds}`;
@@ -227,7 +231,7 @@ function buildSchedule(courses, holidays, config, checked) {
     }
     
     for (const ds of all) {
-      if (s[ds].isHoliday) continue;
+      if (s[ds].isHoliday || s[ds].isMileDay) continue;
       if (!c.days.includes(dow(ds))) continue;
       const tid = `${c.id}:${ds}`;
       const target = c.dailyAmount || 1;
@@ -260,13 +264,14 @@ function buildSchedule(courses, holidays, config, checked) {
   return s;
 }
 
-function cStats(c, holidays, cfg, today) {
+function cStats(c, holidays, cfg, today, activeExamDate) {
   if (c.type === 'custom') {
     const dates = c.customDates || [];
     const future = dates.filter(d => pd(d) >= pd(today) && pd(d) <= pd(cfg.endDate));
     return { type:'custom', scheduled:dates.length, upcoming:future.length };
   }
-  const tgt = c.targetDate || cfg.endDate;
+  // 활성 시험이 있으면 그 날짜를 우선 사용 (강좌 targetDate 무시)
+  const tgt = activeExamDate || c.targetDate || cfg.endDate;
   const from = pd(today) > pd(cfg.startDate) ? today : cfg.startDate;
   const all = daysBtw(from, tgt);
   let sd = 0;
@@ -282,6 +287,8 @@ function cStats(c, holidays, cfg, today) {
 }
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [courses, setCourses] = useState([]);
   const [checked, setChecked] = useState({});
   const [config, setConfig] = useState(DEFAULT_CONFIG);
@@ -296,59 +303,98 @@ function App() {
   const [expandedPast, setExpandedPast] = useState(false);
   const [popTaskId, setPopTaskId] = useState(null);
 
+  // ========== Auth 추적 ==========
   useEffect(() => {
-    (async () => {
-      if (!sb) {
-        setCourses(DEFAULT_COURSES.map((c, i) => ({ ...c, id: `local-${i}` })));
-        const real = fd(new Date());
-        if (real >= DEFAULT_CONFIG.startDate && real <= DEFAULT_CONFIG.endDate) {
-          setToday(real); setAnchor(real);
-        }
-        setLoading(false);
-        return;
+    if (!sb) { setAuthLoading(false); return; }
+    
+    sb.auth.getSession().then(({ data }) => {
+      setUser(data?.session?.user || null);
+      setAuthLoading(false);
+    });
+    
+    const { data: sub } = sb.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user || null);
+    });
+    
+    return () => sub?.subscription?.unsubscribe();
+  }, []);
+
+  const displayName = useMemo(() => {
+    if (!user) return '게스트';
+    return user.user_metadata?.name || user.user_metadata?.full_name || (user.email ? user.email.split('@')[0] : '나');
+  }, [user]);
+
+  useEffect(() => {
+    if (!sb) {
+      setCourses([]);
+      const real = fd(new Date());
+      if (real >= DEFAULT_CONFIG.startDate && real <= DEFAULT_CONFIG.endDate) {
+        setToday(real); setAnchor(real);
       }
-      
+      setLoading(false);
+      return;
+    }
+    
+    if (!user) {
+      // 로그인 안 됨 → 데이터 비우기
+      setCourses([]);
+      setChecked({});
+      setConfig(DEFAULT_CONFIG);
+      setLoading(false);
+      return;
+    }
+    
+    (async () => {
       try {
+        setLoading(true);
         setSyncStatus('syncing');
-        const cR = await sb.from('courses').select('*').order('sort_order');
+        
+        // 1) 강좌 가져오기 (RLS 켜지기 전까지는 user_id로 직접 필터)
+        const cR = await sb.from('courses').select('*').eq('user_id', user.id).order('sort_order');
         if (cR.error) throw cR.error;
+        const coursesFromDb = (cR.data || []).map(fromDb);
         
-        let coursesFromDb;
-        if (cR.data && cR.data.length > 0) {
-          coursesFromDb = cR.data.map(fromDb);
-        } else {
-          const { data, error } = await sb.from('courses').insert(DEFAULT_COURSES.map(toDb)).select();
-          if (error) throw error;
-          coursesFromDb = data.map(fromDb);
-        }
-        
-        const [cfR, chR] = await Promise.all([
-          sb.from('user_config').select('*').eq('id', 1).maybeSingle(),
-          sb.from('task_checks').select('*'),
-        ]);
+        // 2) user_config 가져오기 (없으면 신규 유저 → 기본값 INSERT)
+        const cfR = await sb.from('user_config').select('*').eq('user_id', user.id).maybeSingle();
         if (cfR.error) throw cfR.error;
-        if (chR.error) throw chR.error;
         
+        let cfg;
         if (cfR.data) {
-          const cfg = {
+          cfg = {
             examName: cfR.data.exam_name,
             startDate: cfR.data.start_date,
             endDate: cfR.data.end_date,
             holidays: cfR.data.holidays || [],
             milestones: cfR.data.milestones || [],
+            activeExamId: cfR.data.active_exam_id || 'final',
           };
-          setConfig(cfg);
-          
-          const real = fd(new Date());
-          if (real >= cfg.startDate && real <= cfg.endDate) {
-            setToday(real); setAnchor(real);
-          } else {
-            setToday(cfg.startDate); setAnchor(cfg.startDate);
-          }
+        } else {
+          // 신규 유저: 기본 config INSERT
+          const { data: newCfg } = await sb.from('user_config').insert({
+            user_id: user.id,
+            exam_name: DEFAULT_CONFIG.examName,
+            start_date: DEFAULT_CONFIG.startDate,
+            end_date: DEFAULT_CONFIG.endDate,
+            holidays: DEFAULT_CONFIG.holidays,
+            milestones: DEFAULT_CONFIG.milestones,
+            active_exam_id: DEFAULT_CONFIG.activeExamId,
+          }).select().single();
+          cfg = { ...DEFAULT_CONFIG };
+        }
+        setConfig(cfg);
+        
+        const real = fd(new Date());
+        if (real >= cfg.startDate && real <= cfg.endDate) {
+          setToday(real); setAnchor(real);
+        } else {
+          setToday(cfg.startDate); setAnchor(cfg.startDate);
         }
         
         setCourses(coursesFromDb);
         
+        // 3) task_checks 가져오기
+        const chR = await sb.from('task_checks').select('*').eq('user_id', user.id);
+        if (chR.error) throw chR.error;
         if (chR.data) {
           const m = {};
           for (const r of chR.data) {
@@ -366,7 +412,7 @@ function App() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [user]);
 
   const decideCA = (taskDate, forceToday = false) => {
     const todayStr = fd(new Date());
@@ -375,19 +421,19 @@ function App() {
   };
 
   const saveCheckDbWithCA = useCallback(async (cid, td, v, ca) => {
-    if (!sb || cid === 'exam' || !isUUID(cid)) return;
+    if (!sb || !user || cid === 'exam' || !isUUID(cid)) return;
     try {
       if (v <= 0) {
-        await sb.from('task_checks').delete().eq('course_id', cid).eq('task_date', td);
+        await sb.from('task_checks').delete().eq('course_id', cid).eq('task_date', td).eq('user_id', user.id);
       } else {
         const caIso = new Date(ca + 'T12:00:00').toISOString();
         await sb.from('task_checks').upsert({
           course_id: cid, task_date: td, achieved: v,
-          updated_at: caIso,
-        });
+          updated_at: caIso, user_id: user.id,
+        }, { onConflict: 'course_id,task_date,user_id' });
       }
     } catch (e) { console.error(e); }
-  }, []);
+  }, [user]);
 
   const toggleFull = (t, fromMissed = false) => {
     const [cid, td] = t.id.split(':');
@@ -443,7 +489,7 @@ function App() {
   const resetAll = async () => {
     if (!confirm('체크 기록 전부 초기화할거야?')) return;
     setChecked({});
-    if (sb) { try { await sb.from('task_checks').delete().not('course_id','is',null); } catch(e){} }
+    if (sb && user) { try { await sb.from('task_checks').delete().eq('user_id', user.id); } catch(e){} }
   };
 
   const saveCourse = async (form) => {
@@ -451,8 +497,8 @@ function App() {
       if (form.isNew) {
         const { isNew, id, ...rest } = form;
         let created;
-        if (sb) {
-          const { data, error } = await sb.from('courses').insert(toDb(rest)).select().single();
+        if (sb && user) {
+          const { data, error } = await sb.from('courses').insert({ ...toDb(rest), user_id: user.id }).select().single();
           if (error) throw error;
           created = fromDb(data);
         } else {
@@ -461,8 +507,8 @@ function App() {
         setCourses(prev => [...prev, created]);
       } else {
         let updated = form;
-        if (sb) {
-          const { data, error } = await sb.from('courses').update(toDb(form)).eq('id', form.id).select().single();
+        if (sb && user) {
+          const { data, error } = await sb.from('courses').update(toDb(form)).eq('id', form.id).eq('user_id', user.id).select().single();
           if (error) throw error;
           updated = fromDb(data);
         }
@@ -474,7 +520,7 @@ function App() {
 
   const deleteCourse = async (id) => {
     if (!confirm('이 강좌 삭제할거야? 체크 기록도 같이 날아가.')) return;
-    if (sb) { try { await sb.from('courses').delete().eq('id', id); } catch(e){} }
+    if (sb && user) { try { await sb.from('courses').delete().eq('id', id).eq('user_id', user.id); } catch(e){} }
     setCourses(prev => prev.filter(c => c.id !== id));
     setChecked(prev => {
       const nc = { ...prev };
@@ -487,12 +533,12 @@ function App() {
     const next = config.holidays.includes(ds) ? config.holidays.filter(h=>h!==ds) : [...config.holidays, ds];
     const nc = { ...config, holidays: next };
     setConfig(nc);
-    if (sb) { try { await sb.from('user_config').update({ holidays: next }).eq('id', 1); } catch(e){} }
+    if (sb && user) { try { await sb.from('user_config').update({ holidays: next }).eq('user_id', user.id); } catch(e){} }
   };
 
   const updateConfig = async (c) => {
     setConfig(c);
-    if (sb) { 
+    if (sb && user) { 
       try { 
         await sb.from('user_config').update({ 
           exam_name:c.examName, 
@@ -500,7 +546,8 @@ function App() {
           end_date:c.endDate, 
           holidays:c.holidays,
           milestones:c.milestones || [],
-        }).eq('id',1); 
+          active_exam_id: c.activeExamId || 'final',
+        }).eq('user_id', user.id); 
       } catch(e){ console.error(e); } 
     }
   };
@@ -508,9 +555,9 @@ function App() {
   const updateMilestones = async (newMilestones) => {
     const nc = { ...config, milestones: newMilestones };
     setConfig(nc);
-    if (sb) {
+    if (sb && user) {
       try {
-        await sb.from('user_config').update({ milestones: newMilestones }).eq('id', 1);
+        await sb.from('user_config').update({ milestones: newMilestones }).eq('user_id', user.id);
       } catch (e) { 
         console.error(e); 
         alert('milestones 저장 실패. SQL로 컬럼 추가했어?\nALTER TABLE user_config ADD COLUMN IF NOT EXISTS milestones JSONB DEFAULT \'[]\'::jsonb;'); 
@@ -518,19 +565,47 @@ function App() {
     }
   };
 
+  const setActiveExam = async (examId) => {
+    const nc = { ...config, activeExamId: examId };
+    setConfig(nc);
+    if (sb && user) {
+      try {
+        await sb.from('user_config').update({ active_exam_id: examId }).eq('user_id', user.id);
+      } catch (e) { 
+        console.error(e); 
+        alert('활성 시험 저장 실패. SQL로 컬럼 추가했어?\nALTER TABLE user_config ADD COLUMN IF NOT EXISTS active_exam_id TEXT DEFAULT \'final\';'); 
+      }
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (!confirm('로그아웃 할거야?')) return;
+    await sb.auth.signOut();
+  };
+
   const schedule = useMemo(() => buildSchedule(courses, config.holidays, config, checked), [courses, config, checked]);
   const allDates = useMemo(() => Object.keys(schedule).sort(), [schedule]);
   const wd = useMemo(() => weekDates(anchor), [anchor]);
 
-  const upcomingExams = useMemo(() => {
-    const all = [
+  // 활성 시험 객체 + 날짜
+  const activeExam = useMemo(() => {
+    const id = config.activeExamId || 'final';
+    if (id === 'final') return { id: 'final', name: config.examName, date: config.endDate, isFinal: true };
+    const m = (config.milestones || []).find(x => x.id === id);
+    if (m) return { ...m, isFinal: false };
+    return { id: 'final', name: config.examName, date: config.endDate, isFinal: true };
+  }, [config]);
+  
+  const allExams = useMemo(() => {
+    return [
       ...((config.milestones || []).map(m => ({ ...m, isFinal: false }))),
       { id: 'final', name: config.examName, date: config.endDate, isFinal: true },
-    ];
-    return all
-      .filter(e => pd(e.date) >= pd(today))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [config, today]);
+    ].sort((a, b) => a.date.localeCompare(b.date));
+  }, [config]);
+
+  const upcomingExams = useMemo(() => {
+    return allExams.filter(e => pd(e.date) >= pd(today));
+  }, [allExams, today]);
 
   const missed = useMemo(() => {
     const out = [];
@@ -567,12 +642,12 @@ function App() {
     return { total, done, bySub };
   }, [schedule, checked, allDates]);
 
-  const dL = dDay(today, config.endDate);
+  const dL = dDay(today, activeExam.date);
   const [ws, we] = [wd[0], wd[6]];
   const pastDates = wd.filter(ds => pd(ds) < pd(today));
   const currentDates = wd.filter(ds => pd(ds) >= pd(today));
 
-  if (loading) {
+  if (authLoading || (sb && user && loading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-stone-50">
         <div className="text-center">
@@ -583,6 +658,11 @@ function App() {
     );
   }
 
+  // 로그인 안 됨 → AuthScreen
+  if (sb && !user) {
+    return <AuthScreen />;
+  }
+
   return (
     <div className="min-h-screen bg-stone-50 text-stone-800">
       <header className="bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 text-stone-100 sticky top-0 z-20 shadow-lg">
@@ -590,14 +670,24 @@ function App() {
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2 text-[11px] tracking-widest text-stone-400 uppercase">
-                <Target className="w-3 h-3" /><span>{config.examName} · 양성훈</span>
+                <Target className="w-3 h-3" /><span>{displayName}</span>
               </div>
               <h1 className="text-xl font-bold mt-0.5">밀착관리 캘린더</h1>
             </div>
             <div className="text-right">
-              <div className="text-[10px] text-stone-400 uppercase tracking-widest">{config.examName}까지</div>
+              <div className="text-[10px] text-stone-400 uppercase tracking-widest">{activeExam.name}까지</div>
               <div className="text-2xl font-black text-rose-400 tabular-nums">D-{dL}</div>
             </div>
+          </div>
+
+          {/* 시험 모드 선택 */}
+          <div className="mt-3 flex gap-1 p-1 bg-stone-700/40 rounded-lg overflow-x-auto">
+            {allExams.map(e => (
+              <button key={e.id} onClick={() => setActiveExam(e.id)}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-md text-[11px] font-bold transition-colors ${config.activeExamId === e.id ? 'bg-amber-400 text-stone-900' : 'text-stone-300 hover:text-white'}`}>
+                {e.isFinal ? '🚀' : '📝'} {e.name}대비
+              </button>
+            ))}
           </div>
 
           <div className="mt-3">
@@ -748,7 +838,7 @@ function App() {
 
         {view === 'courses' && (
           <div className="fade-in">
-            <Courses courses={courses} config={config} today={today}
+            <Courses courses={courses} config={config} today={today} activeExamDate={activeExam.date}
               onEdit={setEditing} onDel={deleteCourse}
               onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, lessonsPerDay:1, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'' })}
               onTogH={toggleHoliday} updCfg={updateConfig} updMilestones={updateMilestones} />
@@ -758,13 +848,20 @@ function App() {
         <div className="mt-8 text-center space-y-2">
           <div className="text-[10px] text-stone-400">
             {!HAS_SUPABASE && '⚠️ 로컬 저장 (Supabase 연결 안 됨)'}
-            {HAS_SUPABASE && syncStatus==='ok' && '✅ Supabase 동기화 중'}
+            {HAS_SUPABASE && syncStatus==='ok' && `✅ ${displayName}으로 로그인됨`}
             {HAS_SUPABASE && syncStatus==='syncing' && '⏳ 동기화 중...'}
             {HAS_SUPABASE && syncStatus==='err' && '⚠️ DB 연결 실패'}
           </div>
-          <button onClick={resetAll} className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-rose-500">
-            <Reset className="w-3 h-3" />체크 기록 초기화
-          </button>
+          <div className="flex items-center justify-center gap-3">
+            <button onClick={resetAll} className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-rose-500">
+              <Reset className="w-3 h-3" />체크 기록 초기화
+            </button>
+            {user && (
+              <button onClick={handleSignOut} className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-rose-500">
+                로그아웃
+              </button>
+            )}
+          </div>
         </div>
       </main>
 
@@ -1576,7 +1673,7 @@ function QuickEdit({ task, cur, onSet, onClose }) {
   );
 }
 
-function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg, updMilestones }) {
+function Courses({ courses, config, today, activeExamDate, onEdit, onDel, onAdd, onTogH, updCfg, updMilestones }) {
   const [cO, setCO] = useState(false);
   const [hO, setHO] = useState(false);
   const [mO, setMO] = useState(false);
@@ -1712,15 +1809,15 @@ function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg,
             <div className="text-sm">등록된 강좌 없음</div>
           </div>
         )}
-        {courses.map(c => <CCard key={c.id} c={c} h={config.holidays} cfg={config} td={today} onE={()=>onEdit(c)} onD={()=>onDel(c.id)} />)}
+        {courses.map(c => <CCard key={c.id} c={c} h={config.holidays} cfg={config} td={today} activeExamDate={activeExamDate} onE={()=>onEdit(c)} onD={()=>onDel(c.id)} />)}
       </section>
     </>
   );
 }
 
-function CCard({ c, h, cfg, td, onE, onD }) {
+function CCard({ c, h, cfg, td, activeExamDate, onE, onD }) {
   const col = getSub(c.subject);
-  const s = cStats(c, h, cfg, td);
+  const s = cStats(c, h, cfg, td, activeExamDate);
   const DOW = ['일','월','화','수','목','금','토'];
   const typeLabel = c.type==='lesson'?'진도형':c.type==='quota'?'분량형':'단발형';
   
@@ -2054,6 +2151,104 @@ function Row({ label, children, req }) {
     <div>
       <label className="block text-[11px] font-bold text-stone-600 mb-1 tracking-wide">{label}{req && <span className="text-rose-500 ml-0.5">*</span>}</label>
       {children}
+    </div>
+  );
+}
+
+function AuthScreen() {
+  const [mode, setMode] = useState('login'); // login | signup
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const submit = async () => {
+    setMsg(null);
+    if (!email || !password) { setMsg({ kind:'err', text:'이메일이랑 비번 입력해 임마' }); return; }
+    if (mode === 'signup' && !name.trim()) { setMsg({ kind:'err', text:'이름도 입력해 야' }); return; }
+    
+    setBusy(true);
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await sb.auth.signUp({
+          email, password,
+          options: { data: { name: name.trim() } },
+        });
+        if (error) throw error;
+        if (data.user && !data.session) {
+          setMsg({ kind:'ok', text:'가입 완료. 메일 확인 후 로그인 ㄱㄱ (Supabase에서 confirm email 꺼놨으면 바로 로그인됨)' });
+        }
+      } else {
+        const { error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+    } catch (e) {
+      setMsg({ kind:'err', text: e.message || '뭔가 잘못됨' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-stone-100 via-stone-50 to-rose-50 p-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-6">
+          <div className="text-5xl mb-2">📚</div>
+          <h1 className="text-2xl font-black text-stone-800">패찍이</h1>
+          <p className="text-xs text-stone-500 mt-1">너만의 공부 캘린더</p>
+        </div>
+        
+        <div className="bg-white rounded-2xl border border-stone-200 shadow-lg p-5 space-y-3">
+          <div className="flex gap-1 p-1 bg-stone-100 rounded-lg">
+            <button onClick={()=>{setMode('login'); setMsg(null);}}
+              className={`flex-1 py-2 rounded-md text-xs font-bold ${mode==='login'?'bg-white text-stone-900 shadow-sm':'text-stone-500'}`}>
+              로그인
+            </button>
+            <button onClick={()=>{setMode('signup'); setMsg(null);}}
+              className={`flex-1 py-2 rounded-md text-xs font-bold ${mode==='signup'?'bg-white text-stone-900 shadow-sm':'text-stone-500'}`}>
+              가입
+            </button>
+          </div>
+          
+          {mode === 'signup' && (
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">이름 (캘린더에 표시될 이름)</label>
+              <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="예: 양성훈"
+                className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
+            </div>
+          )}
+          
+          <div>
+            <label className="block text-[11px] font-bold text-stone-600 mb-1">이메일</label>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email"
+              className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
+          </div>
+          
+          <div>
+            <label className="block text-[11px] font-bold text-stone-600 mb-1">비밀번호 (6자 이상)</label>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} 
+              autoComplete={mode==='login'?'current-password':'new-password'}
+              onKeyDown={e=>{if(e.key==='Enter') submit();}}
+              className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
+          </div>
+          
+          {msg && (
+            <div className={`text-xs p-2.5 rounded-lg ${msg.kind==='err'?'bg-rose-50 text-rose-700 border border-rose-200':'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+              {msg.text}
+            </div>
+          )}
+          
+          <button onClick={submit} disabled={busy}
+            className="w-full py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold disabled:bg-stone-300">
+            {busy ? '처리중...' : (mode==='login' ? '로그인' : '가입하기')}
+          </button>
+          
+          <p className="text-[10px] text-stone-400 text-center pt-1">
+            {mode==='login' ? '계정 없으면 위에서 가입 클릭' : '이미 계정 있으면 로그인 클릭'}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
