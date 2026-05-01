@@ -29,7 +29,6 @@
   .tabular-nums { font-variant-numeric: tabular-nums; }
   ::-webkit-scrollbar { display: none; }
   
-  /* 체크박스 누를 때 부드러운 반응 (과하지 않게) */
   @keyframes checkPop {
     0% { transform: scale(1); }
     50% { transform: scale(1.15); }
@@ -43,13 +42,8 @@
   }
   .fade-in { animation: fadeIn 0.2s ease-out; }
   
-  /* 히트맵 셀 */
-  .heat-cell {
-    transition: transform 0.1s ease;
-  }
-  .heat-cell:active {
-    transform: scale(1.3);
-  }
+  .heat-cell { transition: transform 0.1s ease; }
+  .heat-cell:active { transform: scale(1.3); }
 </style>
 </head>
 <body>
@@ -64,7 +58,6 @@
 <script type="text/babel" data-type="module">
 const { useState, useEffect, useMemo, useCallback } = React;
 
-// ========== Supabase 연결 ==========
 const HAS_SUPABASE = window.SUPABASE_URL 
   && window.SUPABASE_URL.startsWith('https://')
   && window.SUPABASE_ANON_KEY 
@@ -72,7 +65,6 @@ const HAS_SUPABASE = window.SUPABASE_URL
 
 const sb = HAS_SUPABASE ? supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY) : null;
 
-// ========== 아이콘 ==========
 const Icon = ({ d, className = "w-4 h-4" }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -98,8 +90,8 @@ const CalOff = (p) => <Icon {...p} d={<><line x1="4.18" y1="4.18" x2="2" y2="2"/
 const Flame = (p) => <Icon {...p} d={<><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></>} />;
 const Trophy = (p) => <Icon {...p} d={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />;
 const Award = (p) => <Icon {...p} d={<><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></>} />;
+const Pencil = (p) => <Icon {...p} d={<><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></>} />;
 
-// ========== 과목 팔레트 ==========
 const SUBJECTS = {
   국어:{c:'text-rose-700',bg:'bg-rose-50',bd:'border-rose-200',ch:'bg-rose-100 text-rose-800',br:'bg-rose-500'},
   영어:{c:'text-sky-700',bg:'bg-sky-50',bd:'border-sky-200',ch:'bg-sky-100 text-sky-800',br:'bg-sky-500'},
@@ -117,7 +109,6 @@ const SUBJECTS = {
 const SUB_LIST = Object.keys(SUBJECTS);
 const getSub = (s) => SUBJECTS[s] || SUBJECTS.기타;
 
-// ========== 날짜 헬퍼 ==========
 const pd = (s) => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
 const fd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const addD = (d, n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r; };
@@ -128,24 +119,29 @@ const dDay = (f, t) => Math.ceil((pd(t) - pd(f)) / 86400000);
 const daysBtw = (f, t) => { const o=[]; let c=pd(f); const e=pd(t); while(c<=e){o.push(fd(c)); c=addD(c,1);} return o; };
 const isUUID = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
-// ========== checked 값 정규화 ==========
 const getVal = (c) => typeof c === 'object' && c !== null ? (c.v || 0) : (c || 0);
 const getCA = (c) => typeof c === 'object' && c !== null ? c.ca : null;
 
-// ========== 달성도 정규화 ==========
 const normDone = (v, target) => {
   if (!target || target <= 0) return 0;
   return Math.min(v, target) / target;
 };
 
-// ========== 기본 데이터 ==========
-const DEFAULT_CONFIG = { examName:'6월 모의고사', startDate:'2026-04-19', endDate:'2026-06-03', holidays:['2026-05-04','2026-05-05'] };
+const DEFAULT_CONFIG = { 
+  examName:'수능', 
+  startDate:'2026-04-19', 
+  endDate:'2026-11-19', 
+  holidays:['2026-05-04','2026-05-05'],
+  milestones: [
+    { id:'m-6mo', name:'6월 모의고사', date:'2026-06-04' },
+  ],
+};
 const DEFAULT_COURSES = [
-  { name:'매3비', subject:'국어', type:'lesson', totalLessons:30, doneLessons:7, unit:'강', targetDate:'2026-06-02', days:[1,2,3,4], postCompleteText:'기출 1회', sortOrder:1 },
-  { name:'매3문', subject:'국어', type:'lesson', totalLessons:30, doneLessons:7, unit:'강', targetDate:'2026-05-29', days:[2,3,4,5], postCompleteText:'기출 1회', sortOrder:2 },
-  { name:'사문', subject:'사문', type:'lesson', totalLessons:16, doneLessons:3, unit:'강', targetDate:'2026-05-22', days:[2,3,4], postCompleteText:'기출 1회', sortOrder:3 },
-  { name:'하루6개 1등급영독', subject:'영어', type:'lesson', totalLessons:25, doneLessons:2, unit:'일차', targetDate:'2026-05-22', days:[1,2,3,4,5], postCompleteText:'약점유형 1세트', sortOrder:4 },
-  { name:'문법', subject:'문법', type:'lesson', totalLessons:98, doneLessons:12, unit:'강', targetDate:'2026-09-03', days:[2,3,4], note:'9모까지 완주 목표', sortOrder:5 },
+  { name:'매3비', subject:'국어', type:'lesson', totalLessons:30, doneLessons:7, lessonsPerDay:1, unit:'강', targetDate:'2026-06-02', days:[1,2,3,4], postCompleteText:'기출 1회', sortOrder:1 },
+  { name:'매3문', subject:'국어', type:'lesson', totalLessons:30, doneLessons:7, lessonsPerDay:1, unit:'강', targetDate:'2026-05-29', days:[2,3,4,5], postCompleteText:'기출 1회', sortOrder:2 },
+  { name:'사문', subject:'사문', type:'lesson', totalLessons:16, doneLessons:3, lessonsPerDay:1, unit:'강', targetDate:'2026-05-22', days:[2,3,4], postCompleteText:'기출 1회', sortOrder:3 },
+  { name:'하루6개 1등급영독', subject:'영어', type:'lesson', totalLessons:25, doneLessons:2, lessonsPerDay:1, unit:'일차', targetDate:'2026-05-22', days:[1,2,3,4,5], postCompleteText:'약점유형 1세트', sortOrder:4 },
+  { name:'문법', subject:'문법', type:'lesson', totalLessons:98, doneLessons:12, lessonsPerDay:1, unit:'강', targetDate:'2026-09-03', days:[2,3,4], note:'9모까지 완주 목표', sortOrder:5 },
   { name:'확통', subject:'확통', type:'quota', dailyAmount:15, unit:'문제', days:[1,2,3,4,5], note:'자이스토리 · 남은 422개 완주', sortOrder:6 },
   { name:'수1', subject:'수1', type:'quota', dailyAmount:20, unit:'문제', days:[1,2,3,4,5], note:'자이스토리 · 감 유지', sortOrder:7 },
   { name:'수2', subject:'수2', type:'quota', dailyAmount:15, unit:'문제', days:[1,2,3,4,5], note:'자이스토리 · 감 유지', sortOrder:8 },
@@ -154,11 +150,10 @@ const DEFAULT_COURSES = [
   { name:'학원', subject:'학원', type:'quota', dailyAmount:2, unit:'h', days:[1,5], nonCarryable:true, note:'정보성 표시 (이월 X)', sortOrder:11 },
 ];
 
-const fromDb = (r) => ({ id:r.id, name:r.name, subject:r.subject, type:r.type, totalLessons:r.total_lessons, doneLessons:r.done_lessons, dailyAmount:r.daily_amount, unit:r.unit||'개', targetDate:r.target_date, days:r.days||[], customDates:r.custom_dates||[], postCompleteText:r.post_complete_text, note:r.note, nonCarryable:r.non_carryable, sortOrder:r.sort_order });
-const toDb = (c) => ({ name:c.name, subject:c.subject, type:c.type, total_lessons:c.totalLessons??null, done_lessons:c.doneLessons??0, daily_amount:c.dailyAmount??null, unit:c.unit, target_date:c.targetDate??null, days:c.days||[], custom_dates:c.customDates||[], post_complete_text:c.postCompleteText??null, note:c.note??null, non_carryable:c.nonCarryable??false, sort_order:c.sortOrder??0 });
+const fromDb = (r) => ({ id:r.id, name:r.name, subject:r.subject, type:r.type, totalLessons:r.total_lessons, doneLessons:r.done_lessons, lessonsPerDay:r.step_per_day || 1, dailyAmount:r.daily_amount, unit:r.unit||'개', targetDate:r.target_date, days:r.days||[], customDates:r.custom_dates||[], postCompleteText:r.post_complete_text, note:r.note, nonCarryable:r.non_carryable, sortOrder:r.sort_order });
+const toDb = (c) => ({ name:c.name, subject:c.subject, type:c.type, total_lessons:c.totalLessons??null, done_lessons:c.doneLessons??0, step_per_day:c.lessonsPerDay||1, daily_amount:c.dailyAmount??null, unit:c.unit, target_date:c.targetDate??null, days:c.days||[], custom_dates:c.customDates||[], post_complete_text:c.postCompleteText??null, note:c.note??null, non_carryable:c.nonCarryable??false, sort_order:c.sortOrder??0 });
 
-// ========== 스케줄 빌더 ==========
-function buildSchedule(courses, holidays, config) {
+function buildSchedule(courses, holidays, config, checked) {
   const s = {};
   const all = daysBtw(config.startDate, config.endDate);
   for (const ds of all) {
@@ -183,28 +178,78 @@ function buildSchedule(courses, holidays, config) {
       continue;
     }
     
-    let p = c.doneLessons || 0;
+    if (c.type === 'lesson') {
+      const perDay = Math.max(1, c.lessonsPerDay || 1);
+      const total = c.totalLessons || 0;
+      let currentLesson = c.doneLessons || 0;
+      
+      for (const ds of all) {
+        if (s[ds].isHoliday) continue;
+        if (!c.days.includes(dow(ds))) continue;
+        
+        const tid = `${c.id}:${ds}`;
+        const start = currentLesson + 1;
+        
+        let text, target, isPost = false;
+        
+        if (start > total) {
+          if (c.postCompleteText) {
+            text = `${c.name} · ${c.postCompleteText}`;
+            target = 1;
+            isPost = true;
+          } else {
+            continue;
+          }
+        } else {
+          const end = Math.min(start + perDay - 1, total);
+          target = end - start + 1;
+          if (target === 1) {
+            text = `${c.name} ${start}${c.unit}`;
+          } else {
+            text = `${c.name} ${start}~${end}${c.unit}`;
+          }
+        }
+        
+        s[ds].tasks.push({ 
+          id:tid, courseId:c.id, subject:c.subject, 
+          text, note:c.note, unit:c.unit, 
+          target, type:'lesson', carryable:!c.nonCarryable,
+          isPostComplete: isPost,
+        });
+        
+        if (!isPost) {
+          const achieved = getVal(checked[tid]);
+          const advance = Math.max(target, achieved);
+          currentLesson = Math.min(currentLesson + advance, total);
+        }
+      }
+      continue;
+    }
+    
     for (const ds of all) {
       if (s[ds].isHoliday) continue;
       if (!c.days.includes(dow(ds))) continue;
       const tid = `${c.id}:${ds}`;
-      let text, target;
-      if (c.type === 'lesson') {
-        p++; target = 1;
-        if (p <= (c.totalLessons||0)) text = `${c.name} ${p}${c.unit}`;
-        else if (c.postCompleteText) text = `${c.name} · ${c.postCompleteText}`;
-        else continue;
-      } else {
-        target = c.dailyAmount || 1;
-        text = c.name;
-      }
-      s[ds].tasks.push({ id:tid, courseId:c.id, subject:c.subject, text, note:c.note, unit:c.unit, target, type:c.type, carryable:!c.nonCarryable });
+      const target = c.dailyAmount || 1;
+      s[ds].tasks.push({ 
+        id:tid, courseId:c.id, subject:c.subject, 
+        text:c.name, note:c.note, unit:c.unit, 
+        target, type:'quota', carryable:!c.nonCarryable 
+      });
     }
   }
   
   const first = config.startDate;
   if (s[first] && s[first].tasks.length > 0 && !s[first].special) {
     s[first].special = '🎯 시작일';
+  }
+  
+  for (const m of (config.milestones || [])) {
+    if (s[m.date] && m.date !== config.endDate) {
+      s[m.date].special = `📝 ${m.name}`;
+      s[m.date].isMilestone = true;
+      s[m.date].milestoneInfo = m;
+    }
   }
   
   if (s[config.endDate]) {
@@ -227,14 +272,15 @@ function cStats(c, holidays, cfg, today) {
   let sd = 0;
   for (const ds of all) { if (holidays.includes(ds)) continue; if (c.days.includes(dow(ds))) sd++; }
   if (c.type === 'lesson') {
+    const perDay = Math.max(1, c.lessonsPerDay || 1);
     const rem = Math.max(0, (c.totalLessons||0) - (c.doneLessons||0));
+    const capacity = sd * perDay;
     const pace = sd > 0 ? rem/sd : 0;
-    return { studyDays:sd, remaining:rem, pace, feasible:sd >= rem };
+    return { studyDays:sd, remaining:rem, pace, capacity, feasible:capacity >= rem, perDay };
   }
   return { studyDays:sd, total:sd * (c.dailyAmount||0) };
 }
 
-// ========== 메인 앱 ==========
 function App() {
   const [courses, setCourses] = useState([]);
   const [checked, setChecked] = useState({});
@@ -244,7 +290,7 @@ function App() {
   
   const [today, setToday] = useState(DEFAULT_CONFIG.startDate);
   const [anchor, setAnchor] = useState(DEFAULT_CONFIG.startDate);
-  const [view, setView] = useState('calendar'); // calendar | courses | achievement
+  const [view, setView] = useState('calendar');
   const [editing, setEditing] = useState(null);
   const [quickEdit, setQuickEdit] = useState(null);
   const [expandedPast, setExpandedPast] = useState(false);
@@ -289,6 +335,7 @@ function App() {
             startDate: cfR.data.start_date,
             endDate: cfR.data.end_date,
             holidays: cfR.data.holidays || [],
+            milestones: cfR.data.milestones || [],
           };
           setConfig(cfg);
           
@@ -319,20 +366,6 @@ function App() {
         setLoading(false);
       }
     })();
-  }, []);
-
-  const saveCheckDb = useCallback(async (cid, td, v) => {
-    if (!sb || cid === 'exam' || !isUUID(cid)) return;
-    try {
-      if (v <= 0) {
-        await sb.from('task_checks').delete().eq('course_id', cid).eq('task_date', td);
-      } else {
-        await sb.from('task_checks').upsert({
-          course_id: cid, task_date: td, achieved: v,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    } catch (e) { console.error(e); }
   }, []);
 
   const decideCA = (taskDate, forceToday = false) => {
@@ -459,12 +492,45 @@ function App() {
 
   const updateConfig = async (c) => {
     setConfig(c);
-    if (sb) { try { await sb.from('user_config').update({ exam_name:c.examName, start_date:c.startDate, end_date:c.endDate, holidays:c.holidays }).eq('id',1); } catch(e){} }
+    if (sb) { 
+      try { 
+        await sb.from('user_config').update({ 
+          exam_name:c.examName, 
+          start_date:c.startDate, 
+          end_date:c.endDate, 
+          holidays:c.holidays,
+          milestones:c.milestones || [],
+        }).eq('id',1); 
+      } catch(e){ console.error(e); } 
+    }
   };
 
-  const schedule = useMemo(() => buildSchedule(courses, config.holidays, config), [courses, config]);
+  const updateMilestones = async (newMilestones) => {
+    const nc = { ...config, milestones: newMilestones };
+    setConfig(nc);
+    if (sb) {
+      try {
+        await sb.from('user_config').update({ milestones: newMilestones }).eq('id', 1);
+      } catch (e) { 
+        console.error(e); 
+        alert('milestones 저장 실패. SQL로 컬럼 추가했어?\nALTER TABLE user_config ADD COLUMN IF NOT EXISTS milestones JSONB DEFAULT \'[]\'::jsonb;'); 
+      }
+    }
+  };
+
+  const schedule = useMemo(() => buildSchedule(courses, config.holidays, config, checked), [courses, config, checked]);
   const allDates = useMemo(() => Object.keys(schedule).sort(), [schedule]);
   const wd = useMemo(() => weekDates(anchor), [anchor]);
+
+  const upcomingExams = useMemo(() => {
+    const all = [
+      ...((config.milestones || []).map(m => ({ ...m, isFinal: false }))),
+      { id: 'final', name: config.examName, date: config.endDate, isFinal: true },
+    ];
+    return all
+      .filter(e => pd(e.date) >= pd(today))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [config, today]);
 
   const missed = useMemo(() => {
     const out = [];
@@ -477,6 +543,7 @@ function App() {
         if (t.type === 'quota') continue; 
         if (t.type === 'custom') continue; 
         if (t.courseId === 'exam') continue;
+        if (t.isPostComplete) continue;
         const v = getVal(checked[t.id]);
         if (v < t.target) out.push({ ...t, originalDate: ds });
       }
@@ -528,7 +595,7 @@ function App() {
               <h1 className="text-xl font-bold mt-0.5">밀착관리 캘린더</h1>
             </div>
             <div className="text-right">
-              <div className="text-[10px] text-stone-400 uppercase tracking-widest">시험까지</div>
+              <div className="text-[10px] text-stone-400 uppercase tracking-widest">{config.examName}까지</div>
               <div className="text-2xl font-black text-rose-400 tabular-nums">D-{dL}</div>
             </div>
           </div>
@@ -564,6 +631,28 @@ function App() {
       <main className="max-w-3xl mx-auto px-4 py-5 pb-24">
         {view === 'calendar' && (
           <div className="fade-in">
+            {upcomingExams.length > 0 && (
+              <section className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Cal className="w-4 h-4 text-stone-600" />
+                  <h2 className="text-sm font-bold text-stone-700">다가오는 시험</h2>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                  {upcomingExams.map(e => {
+                    const d = dDay(today, e.date);
+                    return (
+                      <button onClick={() => { setAnchor(e.date); setExpandedPast(false); }} key={e.id}
+                        className={`flex-shrink-0 px-3 py-2 rounded-xl border-2 text-left ${e.isFinal?'bg-gradient-to-br from-rose-500 to-red-500 text-white border-rose-500':'bg-white border-amber-300'}`}>
+                        <div className={`text-[10px] font-bold ${e.isFinal?'opacity-90':'text-amber-700'}`}>{e.name}</div>
+                        <div className={`text-lg font-black tabular-nums ${e.isFinal?'':'text-amber-900'}`}>D-{d}</div>
+                        <div className={`text-[10px] tabular-nums ${e.isFinal?'opacity-80':'text-stone-500'}`}>{e.date.slice(5).replace('-','/')} ({dowN(e.date)})</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+            
             <section className="mb-5">
               <div className="flex items-center gap-2 mb-3">
                 <Trending className="w-4 h-4 text-stone-600" />
@@ -661,8 +750,8 @@ function App() {
           <div className="fade-in">
             <Courses courses={courses} config={config} today={today}
               onEdit={setEditing} onDel={deleteCourse}
-              onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'' })}
-              onTogH={toggleHoliday} updCfg={updateConfig} />
+              onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, lessonsPerDay:1, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'' })}
+              onTogH={toggleHoliday} updCfg={updateConfig} updMilestones={updateMilestones} />
           </div>
         )}
 
@@ -685,7 +774,6 @@ function App() {
   );
 }
 
-// ========== 🏆 달성 달력 (성취감 대시보드) ==========
 function Achievement({ courses, checked, config, today, schedule }) {
   const achievements = useMemo(() => {
     const byDate = {};
@@ -694,7 +782,7 @@ function Achievement({ courses, checked, config, today, schedule }) {
     for (const ds of allDates) {
       const day = schedule[ds];
       if (!day) continue;
-      byDate[ds] = { total: 0, done: 0, doneOnDate: 0, tasks: [] };
+      byDate[ds] = { total: 0, done: 0, doneOnDate: 0, effortOnDate: 0, tasks: [] };
       for (const t of day.tasks) {
         if (t.courseId === 'exam') continue;
         byDate[ds].total += 1; 
@@ -715,16 +803,17 @@ function Achievement({ courses, checked, config, today, schedule }) {
         const t = schedule[td].tasks.find(x => x.id === tid);
         if (t) taskTarget = t.target;
       }
-      const doneAmount = normDone(val, taskTarget);
+      const cappedDone = normDone(val, taskTarget);
+      const rawEffort = val / Math.max(taskTarget, 1);
       
       if (byDate[td]) {
-        byDate[td].done += doneAmount;
+        byDate[td].done += cappedDone;
       }
       
-      if (ca && ca !== td && byDate[ca]) {
-        byDate[ca].doneOnDate += doneAmount;
-      } else if (byDate[td]) {
-        byDate[td].doneOnDate += doneAmount;
+      const workedDate = (ca && ca !== td) ? ca : td;
+      if (byDate[workedDate]) {
+        byDate[workedDate].doneOnDate += cappedDone;
+        byDate[workedDate].effortOnDate += rawEffort;
       }
     }
     
@@ -733,15 +822,15 @@ function Achievement({ courses, checked, config, today, schedule }) {
 
   const getIntensity = (ds) => {
     const d = achievements[ds];
-    if (!d || d.doneOnDate < 0.1) return 0;
-    if (d.doneOnDate < 2) return 1;
-    if (d.doneOnDate < 4) return 2;
-    if (d.doneOnDate < 6) return 3;
+    if (!d || d.effortOnDate < 0.1) return 0;
+    if (d.effortOnDate < 2) return 1;
+    if (d.effortOnDate < 4) return 2;
+    if (d.effortOnDate < 6) return 3;
     return 4;
   };
 
   const overallStats = useMemo(() => {
-    let totalDone = 0, totalTarget = 0, perfectDays = 0, studyDays = 0, streakCur = 0, streakBest = 0;
+    let totalDone = 0, totalTarget = 0, perfectDays = 0, studyDays = 0, streakBest = 0;
     const today_date = pd(today);
     const allDatesArr = daysBtw(config.startDate, today).filter(d => pd(d) <= today_date);
     
@@ -756,14 +845,11 @@ function Achievement({ courses, checked, config, today, schedule }) {
       totalTarget += d.total;
       if (d.done >= d.total - 0.001) perfectDays++;
       
-      if (d.doneOnDate > 0.001 || d.done >= d.total - 0.001) {
+      if (d.effortOnDate > 0.001 || d.done >= d.total - 0.001) {
         currentStreak++;
         streakBest = Math.max(streakBest, currentStreak);
       } else {
-        if (i === allDatesArr.length - 1) {
-        } else {
-          currentStreak = 0;
-        }
+        currentStreak = 0;
       }
     }
     
@@ -772,14 +858,14 @@ function Achievement({ courses, checked, config, today, schedule }) {
       const ds = allDatesArr[i];
       const d = achievements[ds];
       if (!d || d.total === 0) continue;
-      if (d.done >= d.total - 0.001 || d.doneOnDate > 0.001) {
+      if (d.done >= d.total - 0.001 || d.effortOnDate > 0.001) {
         s++;
       } else {
         if (i === allDatesArr.length - 1) continue;
         break;
       }
     }
-    streakCur = s;
+    const streakCur = s;
     
     return { totalDone, totalTarget, perfectDays, studyDays, streakCur, streakBest };
   }, [achievements, today, config]);
@@ -915,7 +1001,7 @@ function Achievement({ courses, checked, config, today, schedule }) {
                     return (
                       <div key={di} 
                         className={`heat-cell w-3 h-3 rounded-sm ${bg} ${isToday ? 'ring-2 ring-rose-400 ring-offset-1' : ''}`}
-                        title={`${ds}${a ? ` · ${a.doneOnDate}개 달성` : ''}`}
+                        title={`${ds}${a ? ` · 달성도 ${a.effortOnDate.toFixed(1)}` : ''}`}
                       />
                     );
                   })}
@@ -952,7 +1038,7 @@ function Achievement({ courses, checked, config, today, schedule }) {
 
       <div className="mt-5 text-center">
         {pct >= 80 ? (
-          <div className="text-base font-bold text-rose-600">🔥 미쳤다 이 페이스! 6모 조져버리자</div>
+          <div className="text-base font-bold text-rose-600">🔥 미쳤다 이 페이스! 수능 조져버리자</div>
         ) : pct >= 50 ? (
           <div className="text-base font-bold text-amber-600">💪 절반 넘었다! 계속 가자</div>
         ) : pct >= 20 ? (
@@ -998,6 +1084,7 @@ function MonthCalendar({ achievements, config, today, checked, courses, schedule
   
   const DOW = ['일','월','화','수','목','금','토'];
   const today_date = pd(today);
+  const milestoneDates = new Set((config.milestones || []).map(m => m.date));
   
   return (
     <section className="bg-white rounded-2xl border border-stone-200 shadow-sm p-4">
@@ -1039,10 +1126,12 @@ function MonthCalendar({ achievements, config, today, checked, courses, schedule
           const isToday = ds === today;
           const isFuture = pd(ds) > today_date;
           const isHoliday = config.holidays.includes(ds);
+          const isFinal = ds === config.endDate;
+          const isMilestone = milestoneDates.has(ds);
           const hasData = a && a.total > 0;
           const perfect = hasData && a.done >= a.total - 0.001;
           const pct = hasData ? Math.round(a.done/a.total*100) : 0;
-          const hasMakeup = a && a.doneOnDate > (hasData ? a.total : 0.001) + 0.001;
+          const hasMakeup = a && a.effortOnDate > (hasData ? a.total : 0.001) + 0.001;
           const dowIdx = new Date(viewMonth.y, viewMonth.m, day).getDay();
           const clickable = !isFuture; 
           
@@ -1052,7 +1141,9 @@ function MonthCalendar({ achievements, config, today, checked, courses, schedule
               disabled={!clickable}
               className={`aspect-square rounded-lg border relative flex flex-col items-center justify-center text-xs transition-colors
               ${isToday ? 'ring-2 ring-rose-400 border-rose-300' : 'border-stone-200'}
-              ${isHoliday ? 'bg-amber-50' : 
+              ${isFinal ? 'bg-rose-100' :
+                isMilestone ? 'bg-amber-50 border-amber-300' :
+                isHoliday ? 'bg-amber-50' : 
                 isFuture ? 'bg-stone-50' :
                 perfect ? 'bg-emerald-100 hover:bg-emerald-200' :
                 pct >= 50 ? 'bg-emerald-50 hover:bg-emerald-100' :
@@ -1064,7 +1155,7 @@ function MonthCalendar({ achievements, config, today, checked, courses, schedule
                 dowIdx === 0 ? 'text-rose-600' : 
                 dowIdx === 6 ? 'text-sky-600' : 
                 'text-stone-700'
-              } ${isFuture ? 'opacity-40' : ''}`}>
+              } ${isFuture && !isFinal && !isMilestone ? 'opacity-40' : ''}`}>
                 {day}
               </div>
               {hasData && !isFuture && (
@@ -1075,17 +1166,20 @@ function MonthCalendar({ achievements, config, today, checked, courses, schedule
               {hasMakeup && !isFuture && (
                 <div className="absolute -top-0.5 -right-0.5 text-[8px]">🔥</div>
               )}
-              {isHoliday && <div className="absolute top-0.5 right-0.5 text-[8px]">🏖</div>}
+              {isHoliday && !isMilestone && !isFinal && <div className="absolute top-0.5 right-0.5 text-[8px]">🏖</div>}
+              {isMilestone && <div className="absolute top-0.5 right-0.5 text-[8px]">📝</div>}
+              {isFinal && <div className="absolute top-0.5 right-0.5 text-[8px]">🚀</div>}
             </button>
           );
         })}
       </div>
       
-      <div className="mt-3 flex items-center justify-center gap-3 text-[10px] text-stone-500">
+      <div className="mt-3 flex items-center justify-center flex-wrap gap-3 text-[10px] text-stone-500">
         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-100 rounded"></div>완료</span>
         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-50 rounded"></div>50%+</span>
         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-amber-50 rounded"></div>일부</span>
-        <span className="flex items-center gap-1">🔥 만회</span>
+        <span className="flex items-center gap-1">📝 시험</span>
+        <span className="flex items-center gap-1">🔥 만회/초과</span>
       </div>
       
       {selectedDate && <DayDetailModal 
@@ -1104,6 +1198,8 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
   const day = schedule[date];
   const isHoliday = config.holidays.includes(date);
   const wd = dowN(date);
+  const milestone = (config.milestones || []).find(m => m.date === date);
+  const isFinal = date === config.endDate;
   
   const scheduledTasks = day ? day.tasks.filter(t => t.courseId !== 'exam') : [];
   
@@ -1114,7 +1210,7 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
       ...t,
       achieved: v,
       completedAt: ca,
-      status: v >= t.target ? 'done' : v > 0 ? 'partial' : 'missed',
+      status: v >= t.target ? (v > t.target ? 'over' : 'done') : v > 0 ? 'partial' : 'missed',
       doneOnDate: !ca || ca === date, 
     };
   });
@@ -1175,7 +1271,21 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
         </div>
         
         <div className="p-4 space-y-4">
-          {isHoliday && (
+          {isFinal && (
+            <div className="bg-gradient-to-br from-rose-500 to-red-500 text-white rounded-xl p-4 text-center">
+              <div className="text-3xl mb-1">🚀</div>
+              <div className="text-base font-bold">{config.examName} D-DAY</div>
+            </div>
+          )}
+          
+          {milestone && !isFinal && (
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 text-center">
+              <div className="text-3xl mb-1">📝</div>
+              <div className="text-sm font-bold text-amber-800">{milestone.name}</div>
+            </div>
+          )}
+          
+          {isHoliday && !milestone && !isFinal && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
               <div className="text-3xl mb-1">🏖️</div>
               <div className="text-sm font-bold text-amber-800">휴일 · 전면 휴식</div>
@@ -1216,22 +1326,25 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
                   const cfg = getSub(t.subject);
                   return (
                     <div key={t.id} className={`flex items-center gap-2 p-2.5 rounded-lg border ${
+                      t.status === 'over' ? 'bg-purple-50 border-purple-200' :
                       t.status === 'done' ? 'bg-emerald-50 border-emerald-200' :
                       t.status === 'partial' ? 'bg-amber-50 border-amber-200' :
                       'bg-stone-50 border-stone-200'
                     }`}>
                       <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${
+                        t.status === 'over' ? 'bg-purple-500' :
                         t.status === 'done' ? 'bg-emerald-500' :
                         t.status === 'partial' ? 'bg-amber-400' :
                         'bg-stone-300'
                       }`}>
-                        {t.status === 'done' && <Check className="w-3 h-3 text-white" />}
+                        {(t.status === 'done' || t.status === 'over') && <Check className="w-3 h-3 text-white" />}
                         {t.status === 'partial' && <div className="w-2 h-2 bg-white rounded-sm" />}
                         {t.status === 'missed' && <X className="w-3 h-3 text-white" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1 flex-wrap">
                           <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${cfg.ch}`}>{t.subject}</span>
+                          {t.status === 'over' && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-100 text-purple-700">🔥 초과</span>}
                           {!t.doneOnDate && t.achieved > 0 && (
                             <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-100 text-purple-700 tabular-nums">
                               {Number(t.completedAt.slice(5,7))}/{Number(t.completedAt.slice(8))} 만회완료
@@ -1244,6 +1357,7 @@ function DayDetailModal({ date, onClose, checked, courses, schedule, config }) {
                       </div>
                       <div className="text-[10px] tabular-nums font-mono font-bold flex-shrink-0">
                         <span className={
+                          t.status === 'over' ? 'text-purple-700' :
                           t.status === 'done' ? 'text-emerald-700' :
                           t.status === 'partial' ? 'text-amber-700' :
                           'text-stone-400'
@@ -1312,13 +1426,22 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
   const isT = ds === today;
   const isW = d.wd === '토' || d.wd === '일';
   const isE = d.isExam;
+  const isM = d.isMilestone;
   const dt = d.tasks.length;
   const dd = d.tasks.reduce((s,t) => s + normDone(getVal(checked[t.id]), t.target), 0);
   const all = dt > 0 && dd >= dt - 0.001; 
 
   return (
-    <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${isT?'border-rose-400 ring-2 ring-rose-200':'border-stone-200'} ${isE?'bg-gradient-to-br from-rose-50 via-white to-amber-50':''}`}>
-      <div className={`px-4 py-3 flex items-center justify-between ${isT?'bg-rose-500 text-white':isW?'bg-stone-100':'bg-stone-50'} ${isE?'!bg-gradient-to-r !from-rose-600 !to-red-500 !text-white':''}`}>
+    <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden 
+      ${isT?'border-rose-400 ring-2 ring-rose-200':
+        isM?'border-amber-300 ring-1 ring-amber-100':
+        'border-stone-200'} 
+      ${isE?'bg-gradient-to-br from-rose-50 via-white to-amber-50':''}`}>
+      <div className={`px-4 py-3 flex items-center justify-between 
+        ${isT?'bg-rose-500 text-white':
+          isM?'bg-amber-100':
+          isW?'bg-stone-100':'bg-stone-50'} 
+        ${isE?'!bg-gradient-to-r !from-rose-600 !to-red-500 !text-white':''}`}>
         <div className="flex items-center gap-2">
           <div className={`w-9 h-9 rounded-lg flex flex-col items-center justify-center font-bold ${isT||isE?'bg-white/20 text-white':'bg-white text-stone-700 border border-stone-200'}`}>
             <div className="text-[9px] leading-none">{d.wd}</div>
@@ -1326,7 +1449,7 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
           </div>
           <div>
             <div className={`text-xs font-semibold tabular-nums ${isT||isE?'text-white/90':'text-stone-500'}`}>{Number(ds.slice(5,7))}월 {Number(ds.slice(8))}일</div>
-            {d.special && <div className={`text-[11px] font-bold mt-0.5 ${isT||isE?'text-amber-200':'text-rose-600'}`}>{d.special}</div>}
+            {d.special && <div className={`text-[11px] font-bold mt-0.5 ${isT||isE?'text-amber-200':isM?'text-amber-800':'text-rose-600'}`}>{d.special}</div>}
           </div>
         </div>
         <div className="text-right">
@@ -1369,28 +1492,29 @@ function DayCard({ ds, schedule, today, checked, missed, showMissed, onToggle, o
 function Task({ t, v, onT, onA, onE, pop, isMissed, od }) {
   const cfg = getSub(t.subject);
   const tgt = t.target;
-  const isQ = t.type === 'quota' && tgt > 1;
+  const showSteppers = (t.type === 'quota' || t.type === 'lesson') && t.courseId !== 'exam';
   const done = v >= tgt, partial = v > 0 && v < tgt, over = v > tgt;
-  const step = tgt >= 100 ? 10 : tgt >= 20 ? 5 : 1;
+  const step = t.type === 'lesson' ? 1 : (tgt >= 100 ? 10 : tgt >= 20 ? 5 : 1);
 
   return (
-    <div className={`flex items-start gap-2 p-3 rounded-xl ${done?'bg-stone-50 border border-stone-200':`${cfg.bg} border ${cfg.bd}`} ${isMissed&&!done?'ring-1 ring-amber-300':''}`}>
-      <button onClick={onT} className={`flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center mt-0.5 ${done?'bg-emerald-500 border-emerald-500':partial?'bg-amber-100 border-amber-400':`bg-white ${cfg.bd.replace('-200','-400')}`} ${pop?'check-pop':''}`}>
-        {done && <Check className="w-4 h-4 text-white" />}
+    <div className={`flex items-start gap-2 p-3 rounded-xl ${done?'bg-stone-50 border border-stone-200':`${cfg.bg} border ${cfg.bd}`} ${isMissed&&!done?'ring-1 ring-amber-300':''} ${over?'!ring-2 !ring-purple-300':''}`}>
+      <button onClick={onT} className={`flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center mt-0.5 ${over?'bg-purple-500 border-purple-500':done?'bg-emerald-500 border-emerald-500':partial?'bg-amber-100 border-amber-400':`bg-white ${cfg.bd.replace('-200','-400')}`} ${pop?'check-pop':''}`}>
+        {(done || over) && <Check className="w-4 h-4 text-white" />}
         {partial && !done && <div className="w-2.5 h-2.5 bg-amber-500 rounded-sm" />}
       </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cfg.ch}`}>{t.subject}</span>
           {isMissed && od && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 tabular-nums">{Number(od.slice(5,7))}/{Number(od.slice(8))} 놓침</span>}
-          {over && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">🔥 초과</span>}
+          {over && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">🔥 초과 +{v - tgt}</span>}
+          {t.isPostComplete && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">완강 후</span>}
         </div>
         <div className={`text-sm font-semibold ${done&&!over?'text-stone-400 line-through':'text-stone-800'}`}>
           {t.text}
-          {isQ && <span className="ml-1 text-stone-500 font-normal">{tgt}{t.unit}</span>}
+          {t.type === 'quota' && tgt > 1 && <span className="ml-1 text-stone-500 font-normal">{tgt}{t.unit}</span>}
         </div>
         {t.note && <div className={`text-xs mt-0.5 ${done&&!over?'text-stone-300':'text-stone-500'}`}>{t.note}</div>}
-        {isQ && (
+        {showSteppers && (
           <div className="mt-2 flex items-center gap-2">
             <button onClick={()=>onA(-step)} disabled={v<=0} className="w-7 h-7 flex items-center justify-center bg-white border border-stone-300 rounded-md hover:bg-stone-100 disabled:opacity-30">
               <Minus className="w-3.5 h-3.5" />
@@ -1413,7 +1537,7 @@ function QuickEdit({ task, cur, onSet, onClose }) {
   const [inp, setInp] = useState(String(cur));
   const cfg = getSub(task.subject);
   const save = () => { const n = parseInt(inp,10); if (!isNaN(n)) onSet(n); onClose(); };
-  const qv = [0, Math.floor(task.target/2), task.target, task.target + Math.floor(task.target*0.3)];
+  const qv = [0, Math.floor(task.target/2) || 1, task.target, task.target + Math.max(1, Math.floor(task.target*0.5))];
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
@@ -1434,7 +1558,7 @@ function QuickEdit({ task, cur, onSet, onClose }) {
             <div className="text-center text-stone-500 text-sm mt-1 tabular-nums">/ {task.target}{task.unit}</div>
           </div>
           <div>
-            <div className="text-[11px] text-stone-500 font-bold mb-1.5 tracking-wide">빠른 선택</div>
+            <div className="text-[11px] text-stone-500 font-bold mb-1.5 tracking-wide">빠른 선택 (목표 초과 가능)</div>
             <div className="grid grid-cols-4 gap-1.5">
               {qv.map((v,i) => (
                 <button key={i} onClick={()=>setInp(String(v))}
@@ -1452,10 +1576,34 @@ function QuickEdit({ task, cur, onSet, onClose }) {
   );
 }
 
-function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg }) {
+function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg, updMilestones }) {
   const [cO, setCO] = useState(false);
   const [hO, setHO] = useState(false);
+  const [mO, setMO] = useState(false);
   const [nh, setNh] = useState('');
+  const [newMName, setNewMName] = useState('');
+  const [newMDate, setNewMDate] = useState('');
+  
+  const milestones = config.milestones || [];
+
+  const addMilestone = () => {
+    if (!newMName.trim() || !newMDate) {
+      alert('이름이랑 날짜 둘 다 입력해 임마');
+      return;
+    }
+    if (newMDate < config.startDate || newMDate > config.endDate) {
+      alert(`시작일~수능 사이 날짜로 골라 (${config.startDate} ~ ${config.endDate})`);
+      return;
+    }
+    const m = { id: 'm-' + Date.now(), name: newMName.trim(), date: newMDate };
+    updMilestones([...milestones, m]);
+    setNewMName(''); setNewMDate('');
+  };
+  
+  const removeMilestone = (id) => {
+    if (!confirm('이 시험 일정 삭제?')) return;
+    updMilestones(milestones.filter(m => m.id !== id));
+  };
 
   return (
     <>
@@ -1466,7 +1614,7 @@ function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg 
         </button>
         {cO && (
           <div className="px-4 pb-4 pt-1 space-y-2">
-            <Row label="시험 이름">
+            <Row label="최종 시험 이름">
               <input type="text" value={config.examName} onChange={e=>updCfg({...config, examName:e.target.value})}
                 className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
             </Row>
@@ -1475,10 +1623,52 @@ function Courses({ courses, config, today, onEdit, onDel, onAdd, onTogH, updCfg 
                 <input type="date" value={config.startDate} onChange={e=>updCfg({...config, startDate:e.target.value})}
                   className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
               </Row>
-              <Row label="시험일">
+              <Row label="최종 시험일">
                 <input type="date" value={config.endDate} onChange={e=>updCfg({...config, endDate:e.target.value})}
                   className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
               </Row>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="mb-4 bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-sm">
+        <button onClick={()=>setMO(!mO)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-stone-50">
+          <div className="flex items-center gap-2"><Pencil className="w-4 h-4 text-amber-600" /><span className="text-sm font-bold text-stone-700">중간 시험 일정 ({milestones.length})</span></div>
+          <ChevronRight className={`w-4 h-4 text-stone-400 transition-transform ${mO?'rotate-90':''}`} />
+        </button>
+        {mO && (
+          <div className="px-4 pb-4 pt-1 space-y-2">
+            <p className="text-[11px] text-stone-500">9모, 10모 학평 같은 중간 시험 추가하면 캘린더랑 D-day에 자동 표시됨</p>
+            <input type="text" value={newMName} onChange={e=>setNewMName(e.target.value)} placeholder="시험 이름 (예: 9월 모의평가)"
+              className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
+            <div className="flex gap-2">
+              <input type="date" value={newMDate} onChange={e=>setNewMDate(e.target.value)} min={config.startDate} max={config.endDate}
+                className="flex-1 px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
+              <button onClick={addMilestone} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold">추가</button>
+            </div>
+            <div className="space-y-1.5 pt-1">
+              {milestones.length===0 && <span className="text-xs text-stone-400">등록된 중간 시험 없음. 9모/10모 추가해봐</span>}
+              {[...milestones].sort((a,b) => a.date.localeCompare(b.date)).map(m => {
+                const dleft = dDay(today, m.date);
+                const isPast = pd(m.date) < pd(today);
+                return (
+                  <div key={m.id} className={`flex items-center justify-between px-3 py-2 rounded-lg border ${isPast?'bg-stone-50 border-stone-200 opacity-60':'bg-amber-50 border-amber-200'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-base">📝</span>
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-stone-800 truncate">{m.name}</div>
+                        <div className="text-[11px] text-stone-600 tabular-nums">
+                          {m.date} ({dowN(m.date)}) {!isPast && `· D-${dleft}`}
+                        </div>
+                      </div>
+                    </div>
+                    <button onClick={()=>removeMilestone(m.id)} className="p-1.5 text-stone-500 hover:text-rose-600 hover:bg-white rounded flex-shrink-0">
+                      <Trash className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1538,9 +1728,12 @@ function CCard({ c, h, cfg, td, onE, onD }) {
     <div className={`bg-white border ${col.bd} rounded-2xl shadow-sm overflow-hidden`}>
       <div className={`px-4 py-3 ${col.bg} border-b ${col.bd} flex items-start justify-between gap-2`}>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${col.ch}`}>{c.subject}</span>
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white text-stone-600 border border-stone-200">{typeLabel}</span>
+            {c.type==='lesson' && (c.lessonsPerDay||1) > 1 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 tabular-nums">하루 {c.lessonsPerDay}{c.unit}</span>
+            )}
           </div>
           <div className="text-sm font-bold text-stone-800 truncate">{c.name}</div>
           {c.note && <div className="text-[11px] text-stone-500 mt-0.5">{c.note}</div>}
@@ -1555,11 +1748,13 @@ function CCard({ c, h, cfg, td, onE, onD }) {
           <>
             <div className="flex justify-between"><span className="text-stone-500">진도</span><span className="font-semibold tabular-nums">{c.doneLessons} / {c.totalLessons}{c.unit}</span></div>
             <div className="flex justify-between"><span className="text-stone-500">남은 분량</span><span className="font-semibold tabular-nums">{s.remaining}{c.unit}</span></div>
+            <div className="flex justify-between"><span className="text-stone-500">하루 분량</span><span className="font-semibold tabular-nums">{s.perDay}{c.unit}</span></div>
             <div className="flex justify-between"><span className="text-stone-500">학습일</span><span className="font-semibold tabular-nums">{s.studyDays}일</span></div>
+            <div className="flex justify-between"><span className="text-stone-500">최대 가능 분량</span><span className="font-semibold tabular-nums">{s.capacity}{c.unit}</span></div>
             <div className="flex justify-between"><span className="text-stone-500">완강 목표</span><span className="font-semibold tabular-nums">{c.targetDate}</span></div>
             {!s.feasible && s.remaining>0 && (
               <div className="flex items-center gap-1.5 mt-2 px-2 py-1.5 bg-rose-50 border border-rose-200 rounded-lg">
-                <Warn className="w-3.5 h-3.5 text-rose-600" /><span className="text-[11px] text-rose-700 font-semibold">학습일보다 남은 분량이 많음</span>
+                <Warn className="w-3.5 h-3.5 text-rose-600" /><span className="text-[11px] text-rose-700 font-semibold">학습일 × 하루분량 &lt; 남은 분량. 하루분량 늘리거나 일정 조정 ㄱㄱ</span>
               </div>
             )}
           </>
@@ -1608,7 +1803,7 @@ function CCard({ c, h, cfg, td, onE, onD }) {
 }
 
 function CourseForm({ course, onSave, onClose, holidays, config, today }) {
-  const [f, setF] = useState({ ...course, customDates: course.customDates || [] });
+  const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
   
@@ -1619,7 +1814,7 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   };
   
   const ok = f.name && (
-    f.type==='lesson' ? f.totalLessons>0 && f.targetDate && f.days?.length>0
+    f.type==='lesson' ? f.totalLessons>0 && f.targetDate && f.days?.length>0 && (f.lessonsPerDay||1) >= 1
     : f.type==='quota' ? f.dailyAmount>0 && f.days?.length>0
     : f.type==='custom' ? (f.customDates||[]).length>0
     : false
@@ -1652,7 +1847,7 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
             <div className="grid grid-cols-3 gap-1.5">
               <button onClick={()=>up({type:'lesson'})} className={`p-2.5 rounded-xl border-2 text-left ${f.type==='lesson'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
                 <div className={`flex items-center gap-1 mb-0.5 ${f.type==='lesson'?'text-rose-700':'text-stone-600'}`}><Book className="w-3.5 h-3.5" /><span className="text-xs font-bold">진도형</span></div>
-                <div className="text-[9px] text-stone-500">총 N강 중 1강씩</div>
+                <div className="text-[9px] text-stone-500">총 N강 중 N개씩</div>
               </button>
               <button onClick={()=>up({type:'quota'})} className={`p-2.5 rounded-xl border-2 text-left ${f.type==='quota'?'bg-rose-50 border-rose-400':'bg-white border-stone-200'}`}>
                 <div className={`flex items-center gap-1 mb-0.5 ${f.type==='quota'?'text-rose-700':'text-stone-600'}`}><Spark className="w-3.5 h-3.5" /><span className="text-xs font-bold">분량형</span></div>
@@ -1680,8 +1875,25 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
                     className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm tabular-nums" />
                 </Row>
               </div>
+              <Row label="하루 분량 (몇 강씩 나갈지)" req>
+                <div className="flex items-center gap-2">
+                  <input type="number" min="1" max="20" value={f.lessonsPerDay||1} onChange={e=>up({lessonsPerDay:Math.max(1, Number(e.target.value))})}
+                    className="w-24 px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm tabular-nums text-center" />
+                  <span className="text-xs text-stone-500">{f.unit||'강'} / 일</span>
+                  <div className="flex gap-1 ml-auto">
+                    {[1,2,3,5].map(n => (
+                      <button key={n} onClick={()=>up({lessonsPerDay:n})}
+                        className={`px-2.5 py-1.5 rounded-md text-xs font-bold ${f.lessonsPerDay===n?'bg-rose-500 text-white':'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}>{n}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="text-[10px] text-stone-500 mt-1">
+                  💡 추가 달성 가능: 하루에 더 풀면 다음 학습일이 자동으로 당겨져
+                </div>
+              </Row>
               <Row label="완강 목표일" req>
                 <input type="date" value={f.targetDate||''} onChange={e=>up({targetDate:e.target.value})}
+                  min={config.startDate} max={config.endDate}
                   className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
               </Row>
               <Row label="완강 후 할 일 (선택)">
@@ -1741,10 +1953,13 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
                 <div>• 오늘부터 {f.type==='lesson'?f.targetDate:config.endDate}까지 학습일 <b className="tabular-nums">{tmp.studyDays}일</b></div>
                 {f.type==='lesson' ? (
                   <>
-                    <div>• 남은 분량 <b className="tabular-nums">{tmp.remaining}{f.unit}</b></div>
-                    <div>• 하루 <b className="tabular-nums">{tmp.pace<1?'1'+f.unit+' (여유)':tmp.pace.toFixed(1)+f.unit}</b>씩</div>
+                    <div>• 남은 분량 <b className="tabular-nums">{tmp.remaining}{f.unit}</b> · 하루 <b className="tabular-nums">{tmp.perDay}{f.unit}</b>씩</div>
+                    <div>• 최대 진행 가능 <b className="tabular-nums">{tmp.capacity}{f.unit}</b> (학습일 × 하루분량)</div>
                     {!tmp.feasible && tmp.remaining>0 && (
-                      <div className="flex items-center gap-1.5 mt-1.5 text-rose-700 font-semibold"><Warn className="w-3 h-3" />학습일보다 남은 분량이 많음!</div>
+                      <div className="flex items-center gap-1.5 mt-1.5 text-rose-700 font-semibold"><Warn className="w-3 h-3" />하루 분량 늘리거나 일정 조정 필요!</div>
+                    )}
+                    {tmp.feasible && tmp.remaining > 0 && (
+                      <div className="text-emerald-700 font-semibold mt-1.5">✓ 일정대로 가면 완강 가능</div>
                     )}
                   </>
                 ) : <div>• 총 <b className="tabular-nums">{tmp.total}{f.unit}</b> 풀게 됨</div>}
