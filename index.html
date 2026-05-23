@@ -152,8 +152,8 @@ const DEFAULT_COURSES = [
   { name:'학원', subject:'학원', type:'quota', dailyAmount:2, unit:'h', days:[1,5], nonCarryable:true, note:'정보성 표시 (이월 X)', sortOrder:11 },
 ];
 
-const fromDb = (r) => ({ id:r.id, name:r.name, subject:r.subject, type:r.type, totalLessons:r.total_lessons, doneLessons:r.done_lessons, lessonsPerDay:r.step_per_day || 1, dailyAmount:r.daily_amount, unit:r.unit||'개', targetDate:r.target_date, days:r.days||[], customDates:r.custom_dates||[], postCompleteText:r.post_complete_text, note:r.note, nonCarryable:r.non_carryable, sortOrder:r.sort_order });
-const toDb = (c) => ({ name:c.name, subject:c.subject, type:c.type, total_lessons:c.totalLessons??null, done_lessons:c.doneLessons??0, step_per_day:c.lessonsPerDay||1, daily_amount:c.dailyAmount??null, unit:c.unit, target_date:c.targetDate??null, days:c.days||[], custom_dates:c.customDates||[], post_complete_text:c.postCompleteText??null, note:c.note??null, non_carryable:c.nonCarryable??false, sort_order:c.sortOrder??0 });
+const fromDb = (r) => ({ id:r.id, name:r.name, subject:r.subject, type:r.type, totalLessons:r.total_lessons, doneLessons:r.done_lessons, lessonsPerDay:r.step_per_day || 1, dailyAmount:r.daily_amount, unit:r.unit||'개', targetDate:r.target_date, days:r.days||[], customDates:r.custom_dates||[], postCompleteText:r.post_complete_text, note:r.note, nonCarryable:r.non_carryable, sortOrder:r.sort_order, startFromDate:r.start_from_date });
+const toDb = (c) => ({ name:c.name, subject:c.subject, type:c.type, total_lessons:c.totalLessons??null, done_lessons:c.doneLessons??0, step_per_day:c.lessonsPerDay||1, daily_amount:c.dailyAmount??null, unit:c.unit, target_date:c.targetDate??null, days:c.days||[], custom_dates:c.customDates||[], post_complete_text:c.postCompleteText??null, note:c.note??null, non_carryable:c.nonCarryable??false, sort_order:c.sortOrder??0, start_from_date:c.startFromDate??null });
 
 function buildSchedule(courses, holidays, config, checked) {
   const s = {};
@@ -190,6 +190,7 @@ function buildSchedule(courses, holidays, config, checked) {
       for (const ds of all) {
         if (s[ds].isHoliday || s[ds].isMileDay) continue;
         if (!c.days.includes(dow(ds))) continue;
+        if (c.startFromDate && ds < c.startFromDate) continue;
         
         const tid = `${c.id}:${ds}`;
         const start = currentLesson + 1;
@@ -233,6 +234,7 @@ function buildSchedule(courses, holidays, config, checked) {
     for (const ds of all) {
       if (s[ds].isHoliday || s[ds].isMileDay) continue;
       if (!c.days.includes(dow(ds))) continue;
+      if (c.startFromDate && ds < c.startFromDate) continue;
       const tid = `${c.id}:${ds}`;
       const target = c.dailyAmount || 1;
       s[ds].tasks.push({ 
@@ -270,9 +272,9 @@ function cStats(c, holidays, cfg, today, activeExamDate) {
     const future = dates.filter(d => pd(d) >= pd(today) && pd(d) <= pd(cfg.endDate));
     return { type:'custom', scheduled:dates.length, upcoming:future.length };
   }
-  // 활성 시험이 있으면 그 날짜를 우선 사용 (강좌 targetDate 무시)
   const tgt = activeExamDate || c.targetDate || cfg.endDate;
-  const from = pd(today) > pd(cfg.startDate) ? today : cfg.startDate;
+  const fromBase = pd(today) > pd(cfg.startDate) ? today : cfg.startDate;
+  const from = c.startFromDate && pd(c.startFromDate) > pd(fromBase) ? c.startFromDate : fromBase;
   const all = daysBtw(from, tgt);
   let sd = 0;
   for (const ds of all) { if (holidays.includes(ds)) continue; if (c.days.includes(dow(ds))) sd++; }
@@ -303,7 +305,6 @@ function App() {
   const [expandedPast, setExpandedPast] = useState(false);
   const [popTaskId, setPopTaskId] = useState(null);
 
-  // ========== Auth 추적 ==========
   useEffect(() => {
     if (!sb) { setAuthLoading(false); return; }
     
@@ -336,7 +337,6 @@ function App() {
     }
     
     if (!user) {
-      // 로그인 안 됨 → 데이터 비우기
       setCourses([]);
       setChecked({});
       setConfig(DEFAULT_CONFIG);
@@ -349,12 +349,10 @@ function App() {
         setLoading(true);
         setSyncStatus('syncing');
         
-        // 1) 강좌 가져오기 (RLS 켜지기 전까지는 user_id로 직접 필터)
         const cR = await sb.from('courses').select('*').eq('user_id', user.id).order('sort_order');
         if (cR.error) throw cR.error;
         const coursesFromDb = (cR.data || []).map(fromDb);
         
-        // 2) user_config 가져오기 (없으면 신규 유저 → 기본값 INSERT)
         const cfR = await sb.from('user_config').select('*').eq('user_id', user.id).maybeSingle();
         if (cfR.error) throw cfR.error;
         
@@ -369,7 +367,6 @@ function App() {
             activeExamId: cfR.data.active_exam_id || 'final',
           };
         } else {
-          // 신규 유저: 기본 config INSERT
           const { data: newCfg } = await sb.from('user_config').insert({
             user_id: user.id,
             exam_name: DEFAULT_CONFIG.examName,
@@ -392,7 +389,6 @@ function App() {
         
         setCourses(coursesFromDb);
         
-        // 3) task_checks 가져오기
         const chR = await sb.from('task_checks').select('*').eq('user_id', user.id);
         if (chR.error) throw chR.error;
         if (chR.data) {
@@ -586,7 +582,6 @@ function App() {
   const schedule = useMemo(() => buildSchedule(courses, config.holidays, config, checked), [courses, config, checked]);
   const wd = useMemo(() => weekDates(anchor), [anchor]);
 
-  // 활성 시험 객체 + 날짜
   const activeExam = useMemo(() => {
     const id = config.activeExamId || 'final';
     if (id === 'final') return { id: 'final', name: config.examName, date: config.endDate, isFinal: true };
@@ -595,7 +590,6 @@ function App() {
     return { id: 'final', name: config.examName, date: config.endDate, isFinal: true };
   }, [config]);
   
-  // 캘린더 표시 범위 = 활성 시험까지
   const allDates = useMemo(() => 
     Object.keys(schedule).filter(ds => ds <= activeExam.date).sort(), 
     [schedule, activeExam]
@@ -663,7 +657,6 @@ function App() {
     );
   }
 
-  // 로그인 안 됨 → AuthScreen
   if (sb && !user) {
     return <AuthScreen />;
   }
@@ -685,7 +678,6 @@ function App() {
             </div>
           </div>
 
-          {/* 시험 모드 선택 */}
           <div className="mt-3 flex gap-1 p-1 bg-stone-700/40 rounded-lg overflow-x-auto">
             {allExams.map(e => (
               <button key={e.id} onClick={() => setActiveExam(e.id)}
@@ -845,7 +837,7 @@ function App() {
           <div className="fade-in">
             <Courses courses={courses} config={config} today={today} activeExamDate={activeExam.date}
               onEdit={setEditing} onDel={deleteCourse}
-              onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, lessonsPerDay:1, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'' })}
+              onAdd={() => setEditing({ isNew:true, id:null, name:'', subject:'국어', type:'lesson', totalLessons:10, doneLessons:0, lessonsPerDay:1, unit:'강', targetDate:config.endDate, days:[1,2,3,4], note:'', startFromDate: today })}
               onTogH={toggleHoliday} updCfg={updateConfig} updMilestones={updateMilestones} />
           </div>
         )}
@@ -1836,6 +1828,9 @@ function CCard({ c, h, cfg, td, activeExamDate, onE, onD }) {
             {c.type==='lesson' && (c.lessonsPerDay||1) > 1 && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 tabular-nums">하루 {c.lessonsPerDay}{c.unit}</span>
             )}
+            {c.startFromDate && pd(c.startFromDate) > pd(td) && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 tabular-nums">{c.startFromDate.slice(5).replace('-','/')}부터</span>
+            )}
           </div>
           <div className="text-sm font-bold text-stone-800 truncate">{c.name}</div>
           {c.note && <div className="text-[11px] text-stone-500 mt-0.5">{c.note}</div>}
@@ -1853,6 +1848,7 @@ function CCard({ c, h, cfg, td, activeExamDate, onE, onD }) {
             <div className="flex justify-between"><span className="text-stone-500">하루 분량</span><span className="font-semibold tabular-nums">{s.perDay}{c.unit}</span></div>
             <div className="flex justify-between"><span className="text-stone-500">학습일</span><span className="font-semibold tabular-nums">{s.studyDays}일</span></div>
             <div className="flex justify-between"><span className="text-stone-500">최대 가능 분량</span><span className="font-semibold tabular-nums">{s.capacity}{c.unit}</span></div>
+            {c.startFromDate && <div className="flex justify-between"><span className="text-stone-500">시작일</span><span className="font-semibold tabular-nums">{c.startFromDate}</span></div>}
             <div className="flex justify-between"><span className="text-stone-500">완강 목표</span><span className="font-semibold tabular-nums">{c.targetDate}</span></div>
             {!s.feasible && s.remaining>0 && (
               <div className="flex items-center gap-1.5 mt-2 px-2 py-1.5 bg-rose-50 border border-rose-200 rounded-lg">
@@ -1866,6 +1862,7 @@ function CCard({ c, h, cfg, td, activeExamDate, onE, onD }) {
             <div className="flex justify-between"><span className="text-stone-500">하루 분량</span><span className="font-semibold tabular-nums">{c.dailyAmount}{c.unit}</span></div>
             <div className="flex justify-between"><span className="text-stone-500">학습일</span><span className="font-semibold tabular-nums">{s.studyDays}일</span></div>
             <div className="flex justify-between"><span className="text-stone-500">총 분량</span><span className="font-semibold tabular-nums">{s.total}{c.unit}</span></div>
+            {c.startFromDate && <div className="flex justify-between"><span className="text-stone-500">시작일</span><span className="font-semibold tabular-nums">{c.startFromDate}</span></div>}
           </>
         )}
         {c.type==='custom' && (
@@ -1905,7 +1902,7 @@ function CCard({ c, h, cfg, td, activeExamDate, onE, onD }) {
 }
 
 function CourseForm({ course, onSave, onClose, holidays, config, today }) {
-  const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
+  const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1, startFromDate: course.startFromDate || today });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
   
@@ -1963,6 +1960,12 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
           </Row>
           {f.type==='lesson' && (
             <>
+              <Row label="언제부터 시작?" req>
+                <input type="date" value={f.startFromDate||today} onChange={e=>up({startFromDate:e.target.value})}
+                  min={config.startDate} max={config.endDate}
+                  className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
+                <div className="text-[10px] text-stone-500 mt-1">💡 이 날짜 이전엔 과제 안 잡힘 (밀린 거 없음)</div>
+              </Row>
               <div className="grid grid-cols-2 gap-2">
                 <Row label="총 분량" req>
                   <div className="flex gap-1">
@@ -2005,14 +2008,22 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
             </>
           )}
           {f.type==='quota' && (
-            <Row label="하루 분량" req>
-              <div className="flex gap-1">
-                <input type="number" min="1" value={f.dailyAmount||''} onChange={e=>up({dailyAmount:Number(e.target.value)})}
-                  className="flex-1 px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm tabular-nums" />
-                <input type="text" value={f.unit||'개'} onChange={e=>up({unit:e.target.value})}
-                  className="w-14 px-2 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm text-center" />
-              </div>
-            </Row>
+            <>
+              <Row label="언제부터 시작?" req>
+                <input type="date" value={f.startFromDate||today} onChange={e=>up({startFromDate:e.target.value})}
+                  min={config.startDate} max={config.endDate}
+                  className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm" />
+                <div className="text-[10px] text-stone-500 mt-1">💡 이 날짜 이전엔 과제 안 잡힘</div>
+              </Row>
+              <Row label="하루 분량" req>
+                <div className="flex gap-1">
+                  <input type="number" min="1" value={f.dailyAmount||''} onChange={e=>up({dailyAmount:Number(e.target.value)})}
+                    className="flex-1 px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm tabular-nums" />
+                  <input type="text" value={f.unit||'개'} onChange={e=>up({unit:e.target.value})}
+                    className="w-14 px-2 py-2.5 bg-stone-50 border border-stone-200 rounded-lg text-sm text-center" />
+                </div>
+              </Row>
+            </>
           )}
           
           {f.type==='custom' && (
@@ -2052,7 +2063,7 @@ function CourseForm({ course, onSave, onClose, holidays, config, today }) {
             <div className="bg-gradient-to-br from-stone-50 to-stone-100 border border-stone-200 rounded-xl p-3">
               <div className="flex items-center gap-1.5 mb-2"><Spark className="w-3.5 h-3.5 text-stone-600" /><span className="text-xs font-bold text-stone-700">미리보기</span></div>
               <div className="text-xs space-y-1 text-stone-600">
-                <div>• 오늘부터 {f.type==='lesson'?f.targetDate:config.endDate}까지 학습일 <b className="tabular-nums">{tmp.studyDays}일</b></div>
+                <div>• {f.startFromDate||today}부터 {f.type==='lesson'?f.targetDate:config.endDate}까지 학습일 <b className="tabular-nums">{tmp.studyDays}일</b></div>
                 {f.type==='lesson' ? (
                   <>
                     <div>• 남은 분량 <b className="tabular-nums">{tmp.remaining}{f.unit}</b> · 하루 <b className="tabular-nums">{tmp.perDay}{f.unit}</b>씩</div>
@@ -2161,7 +2172,7 @@ function Row({ label, children, req }) {
 }
 
 function AuthScreen() {
-  const [mode, setMode] = useState('login'); // login | signup
+  const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
