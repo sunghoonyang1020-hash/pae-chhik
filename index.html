@@ -614,7 +614,7 @@ function App() {
     const newDone = !cur.done;
     
     // 연결된 task가 있으면 동기화
-    if (cur.linkedTaskId) {
+    if (cur.linkedTaskId && !cur.linkedTaskId.startsWith('stock:')) {
       const td = cur.linkedTaskId.split(':')[1];
       const dayTasks = schedule[td]?.tasks || [];
       const linked = dayTasks.find(t => t.id === cur.linkedTaskId);
@@ -631,6 +631,19 @@ function App() {
           // 이 교시 끄면 → 나머지 형제 교시가 전부 꺼지는지 확인
           const othersAllOff = siblings.filter(p => p.no !== no).every(p => !p.done);
           if (othersAllOff && origDone) toggleFull(linked, td !== date);
+        }
+      } else {
+        // 그날 schedule에 안 깔린 강좌를 시간표에서 당겨 푸는 경우 → checked에 직접 반영해서 진도/달성 당김
+        const [cid] = cur.linkedTaskId.split(':');
+        const course = courses.find(c => c.id === cid);
+        if (course) {
+          // 차감/가산 단위: 진도형=다음분량, 분량형=dailyAmount, 단발형=1
+          let amount = 1;
+          const m = cur.task.match(/(\d+)~(\d+)/);
+          if (course.type === 'lesson' && m) amount = Number(m[2]) - Number(m[1]) + 1;
+          else if (course.type === 'lesson') { const m2 = cur.task.match(/(\d+)\s*\S*\s*$/); amount = 1; }
+          else if (course.type === 'quota') amount = course.dailyAmount || 1;
+          setVal(cur.linkedTaskId, newDone ? amount : 0, true);
         }
       }
     }
@@ -969,11 +982,13 @@ function Achievement({ courses, checked, config, today, schedule, periods }) {
         byDate[workedDate].effortOnDate += rawEffort;
       }
     }
-    // 시간표 달성 반영
+    // 시간표 달성 반영 (연동 과제는 checked에서 이미 집계됨 → 자유입력/비축형만)
     if (periods) {
       for (const [date, list] of Object.entries(periods)) {
         for (const p of list) {
           if (!p.done) continue;
+          // 일반 과제 연동(courseId:date)은 원본이 위에서 이미 카운트됨 → 스킵. 자유입력(연동X)·비축형(stock:)만 반영
+          if (p.linkedTaskId && !p.linkedTaskId.startsWith('stock:')) continue;
           const workedDate = p.completedAt || date;
           if (!byDate[workedDate]) byDate[workedDate] = { total:0, done:0, doneOnDate:0, effortOnDate:0, periodDone:0, tasks:[] };
           byDate[workedDate].effortOnDate += 1;
@@ -1039,6 +1054,22 @@ function Achievement({ courses, checked, config, today, schedule, periods }) {
     }
     return m;
   }, [checked, courses]);
+
+  // 시간표 누적 달성 (자유입력 + 비축형, 완료된 것만)
+  const ttStats = useMemo(() => {
+    let count = 0;
+    const bySub = {};
+    for (const list of Object.values(periods || {})) {
+      for (const p of list) {
+        if (!p.done) continue;
+        if (p.linkedTaskId && !p.linkedTaskId.startsWith('stock:')) continue; // 일반 연동은 위 과목별 누적에 이미 포함
+        count++;
+        const sub = p.subject || '기타';
+        bySub[sub] = (bySub[sub] || 0) + 1;
+      }
+    }
+    return { count, bySub };
+  }, [periods]);
 
   const allDates = daysBtw(config.startDate, config.endDate);
   const startDow = pd(config.startDate).getDay();
@@ -1144,6 +1175,31 @@ function Achievement({ courses, checked, config, today, schedule, periods }) {
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${cfg.ch} w-20 text-center`}>{sub}</span>
                   <div className="flex-1 h-6 bg-stone-100 rounded-md overflow-hidden relative">
                     <div className={`h-full ${cfg.br} transition-all duration-500`} style={{width: `${Math.min(100, cnt / (Math.max(...Object.values(subjectTotals)) || 1) * 100)}%`}} />
+                    <span className="absolute inset-0 flex items-center justify-end pr-2 text-xs font-bold tabular-nums text-stone-700">{cnt}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {ttStats.count > 0 && (
+        <section className="mt-4 bg-white rounded-2xl border border-indigo-200 shadow-sm p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-stone-800">📝 시간표 누적 달성</h3>
+            <span className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 tabular-nums">총 {ttStats.count}개</span>
+          </div>
+          <p className="text-[10px] text-stone-500 mb-3">시간표에서 자유입력·비축형으로 완료한 것 (할당 과제는 위 과목별 누적에 포함됨)</p>
+          <div className="space-y-2">
+            {Object.entries(ttStats.bySub).sort((a,b) => b[1] - a[1]).map(([sub, cnt]) => {
+              const cfg = getSub(sub);
+              const max = Math.max(...Object.values(ttStats.bySub)) || 1;
+              return (
+                <div key={sub} className="flex items-center gap-2">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${cfg.ch} w-20 text-center`}>{sub}</span>
+                  <div className="flex-1 h-6 bg-stone-100 rounded-md overflow-hidden relative">
+                    <div className={`h-full ${cfg.br} transition-all duration-500`} style={{width: `${Math.min(100, cnt / max * 100)}%`}} />
                     <span className="absolute inset-0 flex items-center justify-end pr-2 text-xs font-bold tabular-nums text-stone-700">{cnt}</span>
                   </div>
                 </div>
@@ -1398,10 +1454,20 @@ function DayCard({ ds, schedule, today, checked, periods, missed, showMissed, on
   const dd = d.tasks.reduce((s,t) => s + normDone(getVal(checked[t.id]), t.target), 0);
   const all = dt > 0 && dd >= dt - 0.001; 
 
-  // 이 날 시간표에서 완료한 것 중 캘린더 과제와 연동 안 된 항목 (자유입력/비축형)
-  // 캘린더에 띄울 시간표 항목: ①자유입력(연동X) ②비축형(stock:로 연동) — 일반 과제 연동은 원본이 이미 위에 뜨므로 제외
-  const ttDone = (periods && periods[ds] ? periods[ds] : []).filter(p => 
-    p.task?.trim() && (!p.linkedTaskId || p.linkedTaskId.startsWith('stock:'))
+  // 이 날 시간표 항목들
+  const dayPeriods = periods && periods[ds] ? periods[ds] : [];
+  const taskIds = new Set(d.tasks.map(t => t.id));
+  // 과제ID → 연결된 교시번호 배열 (그날 깔린 과제가 시간표 몇 교시에 들어갔는지)
+  const periodMap = {};
+  for (const p of dayPeriods) {
+    if (p.linkedTaskId && !p.linkedTaskId.startsWith('stock:') && taskIds.has(p.linkedTaskId)) {
+      if (!periodMap[p.linkedTaskId]) periodMap[p.linkedTaskId] = [];
+      periodMap[p.linkedTaskId].push(p.no);
+    }
+  }
+  // 위 목록에 합칠 시간표 항목: ①자유입력(연동X) ②비축형(stock:) ③당겨푼 강좌(courseId:date인데 그날 원본 없음) — 그날 깔린 과제 연동은 d.tasks에 이미 있고 교시만 뱃지로 표시
+  const ttExtra = dayPeriods.filter(p => 
+    p.task?.trim() && (!p.linkedTaskId || p.linkedTaskId.startsWith('stock:') || !taskIds.has(p.linkedTaskId))
   );
 
   return (
@@ -1431,7 +1497,26 @@ function DayCard({ ds, schedule, today, checked, periods, missed, showMissed, on
         </div>
       </div>
       <div className="p-3 space-y-2">
-        {d.tasks.map(t => <Task key={t.id} t={t} v={getVal(checked[t.id])} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} pop={popTaskId===t.id} />)}
+        {d.tasks.map(t => <Task key={t.id} t={t} v={getVal(checked[t.id])} onT={()=>onToggle(t)} onA={d=>onAdjust(t,d)} onE={()=>onQuickEdit(t)} pop={popTaskId===t.id} periodNos={periodMap[t.id]} />)}
+        {ttExtra.map(p => {
+          const cfg = getSub(p.subject);
+          const isStock = p.linkedTaskId && p.linkedTaskId.startsWith('stock:');
+          return (
+            <div key={`tt-${p.no}`} className={`flex items-start gap-2 p-3 rounded-xl border ${p.done?'bg-stone-50 border-stone-200':`${cfg.bg} ${cfg.bd}`}`}>
+              <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center mt-0.5 ${p.done?'bg-emerald-500':'bg-stone-300'}`}>
+                {p.done ? <Check className="w-4 h-4 text-white" /> : <div className="w-2.5 h-2.5 bg-white rounded-sm" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cfg.ch}`}>{p.subject}</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{p.no}교시</span>
+                  {isStock && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">비축</span>}
+                </div>
+                <div className={`text-sm font-semibold ${p.done?'text-stone-400 line-through':'text-stone-800'}`}>{p.task}</div>
+              </div>
+            </div>
+          );
+        })}
         {showMissed && missed.length > 0 && (
           <div className="mt-3 pt-3 border-t-2 border-dashed border-amber-300">
             <div className="flex items-center gap-1.5 mb-2">
@@ -1443,32 +1528,7 @@ function DayCard({ ds, schedule, today, checked, periods, missed, showMissed, on
             </div>
           </div>
         )}
-        {ttDone.length > 0 && (
-          <div className="mt-3 pt-3 border-t-2 border-dashed border-indigo-200">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Pencil className="w-3.5 h-3.5 text-indigo-600" />
-              <span className="text-xs font-bold text-indigo-700">시간표 배정 ({ttDone.length}개)</span>
-            </div>
-            <div className="space-y-1.5">
-              {ttDone.map(p => {
-                const cfg = getSub(p.subject);
-                const isStock = p.linkedTaskId && p.linkedTaskId.startsWith('stock:');
-                return (
-                  <div key={`tt-${p.no}`} className={`flex items-center gap-2 p-2.5 rounded-lg border ${p.done?'bg-indigo-50 border-indigo-200':'bg-stone-50 border-stone-200'}`}>
-                    <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${p.done?'bg-indigo-500':'bg-stone-300'}`}>
-                      {p.done ? <Check className="w-3 h-3 text-white" /> : <div className="w-2 h-2 bg-white rounded-sm" />}
-                    </div>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cfg.ch} flex-shrink-0`}>{p.subject}</span>
-                    <span className={`text-xs font-semibold flex-1 truncate ${p.done?'text-stone-800':'text-stone-500'}`}>{p.task}</span>
-                    {isStock && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-indigo-100 text-indigo-700 flex-shrink-0">비축</span>}
-                    <span className="text-[9px] font-bold text-indigo-600 flex-shrink-0">{p.no}교시</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        {d.tasks.length === 0 && !showMissed && ttDone.length === 0 && (
+        {d.tasks.length === 0 && !showMissed && ttExtra.length === 0 && (
           <div className="text-center text-stone-400 py-8 text-sm">
             <div className="text-2xl mb-1">{d.isHoliday?'🏖️':'😴'}</div>
             <div>{d.isHoliday?'휴일이야 · 진짜 쉬어':'쉬는 날'}</div>
@@ -1484,7 +1544,7 @@ function DayCard({ ds, schedule, today, checked, periods, missed, showMissed, on
   );
 }
 
-function Task({ t, v, onT, onA, onE, pop, isMissed, od }) {
+function Task({ t, v, onT, onA, onE, pop, isMissed, od, periodNos }) {
   const cfg = getSub(t.subject);
   const tgt = t.target;
   const showSteppers = (t.type === 'quota' || t.type === 'lesson') && t.courseId !== 'exam';
@@ -1500,6 +1560,7 @@ function Task({ t, v, onT, onA, onE, pop, isMissed, od }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cfg.ch}`}>{t.subject}</span>
+          {periodNos && periodNos.length > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{periodNos.sort((a,b)=>a-b).join(',')}교시</span>}
           {isMissed && od && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 tabular-nums">{Number(od.slice(5,7))}/{Number(od.slice(8))} 놓침</span>}
           {over && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">🔥 초과 +{v - tgt}</span>}
           {t.isPostComplete && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">완강 후</span>}
@@ -1791,7 +1852,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-}
+  }
 function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
@@ -2069,6 +2130,47 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
     });
   }, [courses, periods]);
 
+  // 이미 그날 깔린 강좌 ID
+  const assignedCourseIds = useMemo(() => new Set(assignedTasks.map(t => t.courseId)), [assignedTasks]);
+
+  // 그날 안 깔린 강좌도 "추가로 당겨 풀기" 후보로 (진도형/분량형/단발형). 비축형은 따로 처리됨
+  const otherCourses = useMemo(() => {
+    const out = [];
+    for (const c of (courses || [])) {
+      if (c.type === 'stock') continue;
+      if (assignedCourseIds.has(c.id)) continue; // 그날 이미 깔린 건 위에 있음
+      if (c.type === 'lesson') {
+        // 현재까지 체크된 최대 강수 → 다음 분량 제안
+        let maxDone = c.doneLessons || 0;
+        for (const [tid, v] of Object.entries(checked)) {
+          if (!tid.startsWith(`${c.id}:`)) continue;
+          // 해당 날짜의 그 강좌 target만큼 진행됐다고 보고, 단순히 누적 추정
+        }
+        // 정확한 다음 강 계산: schedule 전체에서 이 강좌의 마지막 배정 분량 찾기
+        let lastEnd = c.doneLessons || 0;
+        for (const ds of Object.keys(schedule).sort()) {
+          for (const t of schedule[ds].tasks) {
+            if (t.courseId !== c.id || t.isPostComplete) continue;
+            const m = t.text.match(/(\d+)(?:~(\d+))?[^\d]*$/);
+            if (m) { const end = Number(m[2] || m[1]); if (end > lastEnd) lastEnd = end; }
+          }
+        }
+        const start = lastEnd + 1;
+        const total = c.totalLessons || 0;
+        if (start > total) continue; // 이미 다 깔림
+        const per = Math.max(1, c.lessonsPerDay || 1);
+        const end = Math.min(start + per - 1, total);
+        const text = end > start ? `${c.name} ${start}~${end}${c.unit}` : `${c.name} ${start}${c.unit}`;
+        out.push({ courseId: c.id, subject: c.subject, name: c.name, text, type: 'lesson', start, end, unit: c.unit, isExtra: true });
+      } else if (c.type === 'quota') {
+        out.push({ courseId: c.id, subject: c.subject, name: c.name, text: `${c.name} (추가 ${c.dailyAmount||1}${c.unit})`, type: 'quota', amount: c.dailyAmount||1, unit: c.unit, isExtra: true });
+      } else if (c.type === 'custom') {
+        out.push({ courseId: c.id, subject: c.subject, name: c.name, text: `${c.name} (추가)`, type: 'custom', unit: c.unit||'', isExtra: true });
+      }
+    }
+    return out;
+  }, [courses, assignedCourseIds, schedule, checked]);
+
   // 이 과제가 이미 몇 교시에 연결됐는지 (중복 허용하되 표시용)
   const linkCount = (taskId) => dayPeriods.filter(p => p.linkedTaskId === taskId).length;
   const pickList = [...assignedTasks, ...missedTasks];
@@ -2078,6 +2180,16 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
       subject: task.subject, 
       task: task.text + (task.isMissed ? ` (${task.originalDate?.slice(5).replace('-','/')} 밀림)` : ''),
       linkedTaskId: task.id,
+    });
+    setPickerFor(null);
+  };
+
+  // 그날 안 깔린 강좌 당겨풀기: linkedTaskId = courseId:date 로 꽂아서 진도/달성 반영 (체크 시 togglePeriodDone이 처리)
+  const pickExtra = (no, ec) => {
+    onSave(date, no, {
+      subject: ec.subject,
+      task: ec.text,
+      linkedTaskId: `${ec.courseId}:${date}`,
     });
     setPickerFor(null);
   };
@@ -2148,7 +2260,7 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
                       onChange={e => onSave(date, no, { task: e.target.value, subject: p.subject || '기타' })}
                       placeholder="직접 입력"
                       className="flex-1 min-w-0 px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-md text-xs" />
-                    <button onClick={() => setPickerFor(no)} disabled={pickList.length===0 && stockCourses.filter(sc=>sc.left>0).length===0}
+                    <button onClick={() => setPickerFor(no)} disabled={pickList.length===0 && stockCourses.filter(sc=>sc.left>0).length===0 && otherCourses.length===0}
                       className="px-2 py-1.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-md text-[10px] font-bold flex-shrink-0 whitespace-nowrap">
                       할당+
                     </button>
@@ -2245,7 +2357,29 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
                   </div>
                 </div>
               )}
-              {pickList.length === 0 && stockCourses.length === 0 && (
+              {otherCourses.length > 0 && (
+                <div>
+                  <div className="text-xs font-bold text-rose-700 mb-2">➕ 다른 강좌 당겨 풀기 (오늘 안 깔린 거)</div>
+                  <p className="text-[10px] text-stone-500 mb-2">진도형은 풀면 완강일이 자동으로 당겨져</p>
+                  <div className="space-y-1.5">
+                    {otherCourses.map(ec => {
+                      const cfg = getSub(ec.subject);
+                      const lc = linkCount(`${ec.courseId}:${date}`);
+                      const tl = ec.type==='lesson'?'진도':ec.type==='quota'?'분량':'단발';
+                      return (
+                        <button key={ec.courseId} onClick={() => pickExtra(pickerFor, ec)}
+                          className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left ${cfg.bg} ${cfg.bd} hover:brightness-95`}>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cfg.ch} flex-shrink-0`}>{ec.subject}</span>
+                          <span className="text-xs font-semibold text-stone-800 flex-1 truncate">{ec.text}</span>
+                          {lc > 0 && <span className="text-[9px] text-indigo-700 font-bold flex-shrink-0">🔗{lc}</span>}
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 flex-shrink-0">{tl}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {pickList.length === 0 && stockCourses.length === 0 && otherCourses.length === 0 && (
                 <div className="text-center py-8 text-stone-400">
                   <div className="text-3xl mb-2">🤷</div>
                   <div className="text-sm">선택할 할당 과제가 없어<br/>직접 입력해 임마</div>
@@ -2347,4 +2481,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 
 </body>
-</html> 
+</html>
