@@ -56,7 +56,7 @@
 </script>
 
 <script type="text/babel" data-type="module">
-const { useState, useEffect, useMemo, useCallback } = React;
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
 const HAS_SUPABASE = window.SUPABASE_URL 
   && window.SUPABASE_URL.startsWith('https://')
@@ -304,7 +304,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [courses, setCourses] = useState([]);
   const [checked, setChecked] = useState({});
-  const [periods, setPeriods] = useState({}); // { 'YYYY-MM-DD': [{ id, no, subject, task, done, completedAt, linkedTaskId }] }
+  const [periods, setPeriods] = useState({}); // { 'YYYY-MM-DD': [{ id, no, subject, task, done, completedAt, linkedTaskId, qty }] }
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState('idle');
@@ -316,6 +316,7 @@ function App() {
   const [quickEdit, setQuickEdit] = useState(null);
   const [expandedPast, setExpandedPast] = useState(false);
   const [popTaskId, setPopTaskId] = useState(null);
+  const insertingPeriods = useRef(new Set()); // INSERT 진행중인 tmp id (중복 방지)
 
   useEffect(() => {
     if (!sb) { setAuthLoading(false); return; }
@@ -420,6 +421,8 @@ function App() {
                 id: r.id, no: r.period_no, subject: r.subject || '기타', 
                 task: r.task || '', done: r.done, completedAt: r.completed_at,
                 linkedTaskId: r.linked_task_id || null,
+                slotOrder: r.slot_order || 0,
+                qty: r.qty != null ? Number(r.qty) : null,
               });
             }
             for (const k of Object.keys(pm)) pm[k].sort((a,b) => a.no - b.no);
@@ -590,8 +593,7 @@ function App() {
   // 새 항목 추가
   const addPeriod = async (date, no, fields) => {
     const tmpId = 'tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-    const item = { id: tmpId, no, subject: '기타', task: '', done: false, linkedTaskId: null, completedAt: null, ...fields };
-    if (!item.task?.trim() && !item.subject) return;
+    const item = { id: tmpId, no, subject: '기타', task: '', done: false, linkedTaskId: null, completedAt: null, qty: null, ...fields };
 
     setPeriods(prev => {
       const newDate = [...(prev[date] || []), item];
@@ -599,6 +601,8 @@ function App() {
       return { ...prev, [date]: newDate };
     });
 
+    // task가 비어있으면 DB 저장 보류 (직접입력 빈 칸) → 글자 들어오면 updatePeriod에서 insert
+    if (!item.task?.trim()) return;
     if (!sb || !user) return;
     try {
       const completedAt = item.done ? (item.completedAt || fd(new Date())) : null;
@@ -607,9 +611,9 @@ function App() {
         subject: item.subject, task: item.task,
         done: item.done, completed_at: completedAt,
         linked_task_id: item.linkedTaskId || null,
+        qty: item.qty != null ? item.qty : null,
       }).select().single();
       if (error) throw error;
-      // 임시 id를 진짜 uuid로 교체
       if (data) setPeriods(prev => ({
         ...prev,
         [date]: (prev[date] || []).map(p => p.id === tmpId ? { ...p, id: data.id } : p),
@@ -630,18 +634,66 @@ function App() {
     });
     if (!merged) return;
 
-    // 내용이 통째로 비면 삭제
-    const isEmpty = !merged.task?.trim() && !merged.subject;
-    if (isEmpty) { deletePeriod(date, id); return; }
+    // 내용이 통째로 비면 삭제 (DB에 있던 거면 지움, tmp면 그냥 로컬에서)
+    const isEmpty = !merged.task?.trim();
+    if (isEmpty) {
+      if (!String(id).startsWith('tmp-')) deletePeriod(date, id);
+      else setPeriods(prev => ({ ...prev, [date]: (prev[date]||[]).filter(p => p.id !== id) }));
+      return;
+    }
 
     if (!sb || !user) return;
-    if (String(id).startsWith('tmp-')) return; // 아직 insert 안 끝난 항목은 스킵
+
+    if (String(id).startsWith('tmp-')) {
+      // 아직 DB에 없는 항목(직접입력 빈 칸에서 시작) → 내용 생겼으니 지금 INSERT
+      if (insertingPeriods.current.has(id)) return; // 이미 INSERT 진행중이면 스킵 (중복 방지)
+      insertingPeriods.current.add(id);
+      try {
+        const completedAt = merged.done ? (merged.completedAt || fd(new Date())) : null;
+        const { data, error } = await sb.from('daily_periods').insert({
+          user_id: user.id, period_date: date, period_no: merged.no,
+          subject: merged.subject, task: merged.task,
+          done: merged.done, completed_at: completedAt,
+          linked_task_id: merged.linkedTaskId || null,
+          qty: merged.qty != null ? merged.qty : null,
+        }).select().single();
+        if (error) throw error;
+        if (data) {
+          const realId = data.id;
+          // 그 사이 더 입력됐을 수 있으니 최신 상태로 id 교체 후, 최신 내용 한번 더 저장
+          let latest = null;
+          setPeriods(prev => {
+            const arr = (prev[date] || []).map(p => {
+              if (p.id !== id) return p;
+              latest = { ...p, id: realId };
+              return latest;
+            });
+            return { ...prev, [date]: arr };
+          });
+          if (latest && (latest.task !== merged.task || latest.subject !== merged.subject)) {
+            try {
+              await sb.from('daily_periods').update({
+                subject: latest.subject, task: latest.task,
+                done: latest.done, completed_at: latest.done ? (latest.completedAt || fd(new Date())) : null,
+                linked_task_id: latest.linkedTaskId || null,
+                qty: latest.qty != null ? latest.qty : null,
+              }).eq('id', realId);
+            } catch(e) { console.error(e); }
+          }
+        }
+      } catch(e) { console.error(e); }
+      finally { insertingPeriods.current.delete(id); }
+      return;
+    }
+
+    // 이미 DB에 있는 항목 → UPDATE
     try {
       const completedAt = merged.done ? (merged.completedAt || fd(new Date())) : null;
       await sb.from('daily_periods').update({
         subject: merged.subject, task: merged.task,
         done: merged.done, completed_at: completedAt,
         linked_task_id: merged.linkedTaskId || null,
+        qty: merged.qty != null ? merged.qty : null,
       }).eq('id', id);
     } catch(e) { console.error(e); }
   };
@@ -657,47 +709,51 @@ function App() {
     try { await sb.from('daily_periods').delete().eq('id', id); } catch(e) { console.error(e); }
   };
 
+  // 연동 과제의 checked를, 그 과제에 연결된 done 항목들의 qty 합으로 다시 계산
+  const recalcLinked = (date, linkedTaskId, overrides) => {
+    if (!linkedTaskId || linkedTaskId.startsWith('stock:')) return;
+    const td = linkedTaskId.split(':')[1];
+    const [cid] = linkedTaskId.split(':');
+    const course = courses.find(c => c.id === cid);
+    const linked = schedule[td]?.tasks?.find(t => t.id === linkedTaskId);
+    const qtyOf = (p) => {
+      if (p.qty != null) return p.qty;
+      if (linked) return linked.target;
+      if (course) {
+        const m = p.task.match(/(\d+)~(\d+)/);
+        if (course.type === 'lesson' && m) return Number(m[2]) - Number(m[1]) + 1;
+        if (course.type === 'quota') return course.dailyAmount || 1;
+      }
+      return 1;
+    };
+    // overrides: { id, done, qty } — 아직 state 반영 전 값으로 계산
+    const list = (periods[date] || []).map(p => {
+      if (overrides && p.id === overrides.id) return { ...p, ...overrides };
+      return p;
+    });
+    const sum = list
+      .filter(p => p.linkedTaskId === linkedTaskId && p.done)
+      .reduce((s, p) => s + qtyOf(p), 0);
+    setVal(linkedTaskId, sum, td !== date);
+  };
+
   const togglePeriodDone = (date, id) => {
     const cur = (periods[date] || []).find(p => p.id === id);
     if (!cur || !cur.task?.trim()) return;
     const newDone = !cur.done;
-    
-    // 연결된 task가 있으면 동기화
-    if (cur.linkedTaskId && !cur.linkedTaskId.startsWith('stock:')) {
-      const td = cur.linkedTaskId.split(':')[1];
-      const dayTasks = schedule[td]?.tasks || [];
-      const linked = dayTasks.find(t => t.id === cur.linkedTaskId);
-      if (linked) {
-        const curVal = getVal(checked[cur.linkedTaskId]);
-        const origDone = curVal >= linked.target;
-        // 같은 과제에 연결된 모든 항목
-        const siblings = (periods[date] || []).filter(p => p.linkedTaskId === cur.linkedTaskId);
-        
-        if (newDone) {
-          // 하나라도 체크되면 원본 채우기 (아직 미달성일 때만)
-          if (!origDone) toggleFull(linked, td !== date);
-        } else {
-          // 이 항목 끄면 → 나머지 형제 항목이 전부 꺼지는지 확인
-          const othersAllOff = siblings.filter(p => p.id !== id).every(p => !p.done);
-          if (othersAllOff && origDone) toggleFull(linked, td !== date);
-        }
-      } else {
-        // 그날 schedule에 안 깔린 강좌를 시간표에서 당겨 푸는 경우 → checked에 직접 반영해서 진도/달성 당김
-        const [cid] = cur.linkedTaskId.split(':');
-        const course = courses.find(c => c.id === cid);
-        if (course) {
-          // 차감/가산 단위: 진도형=다음분량, 분량형=dailyAmount, 단발형=1
-          let amount = 1;
-          const m = cur.task.match(/(\d+)~(\d+)/);
-          if (course.type === 'lesson' && m) amount = Number(m[2]) - Number(m[1]) + 1;
-          else if (course.type === 'lesson') { const m2 = cur.task.match(/(\d+)\s*\S*\s*$/); amount = 1; }
-          else if (course.type === 'quota') amount = course.dailyAmount || 1;
-          setVal(cur.linkedTaskId, newDone ? amount : 0, true);
-        }
-      }
+    if (cur.linkedTaskId) {
+      recalcLinked(date, cur.linkedTaskId, { id, done: newDone });
     }
-    
     updatePeriod(date, id, { done: newDone, completedAt: newDone ? fd(new Date()) : null });
+  };
+
+  // 수량 변경 (done 상태면 캘린더 즉시 재반영)
+  const setPeriodQty = (date, id, qty) => {
+    const cur = (periods[date] || []).find(p => p.id === id);
+    updatePeriod(date, id, { qty });
+    if (cur && cur.done && cur.linkedTaskId) {
+      recalcLinked(date, cur.linkedTaskId, { id, qty });
+    }
   };
 
   const schedule = useMemo(() => buildSchedule(courses, config.holidays, config, checked), [courses, config, checked]);
@@ -952,7 +1008,7 @@ function App() {
 
         {view === 'timetable' && (
           <div className="fade-in">
-            <Timetable today={today} periods={periods} onAdd={addPeriod} onUpdate={updatePeriod} onDelete={deletePeriod} onToggle={togglePeriodDone}
+            <Timetable today={today} periods={periods} onAdd={addPeriod} onUpdate={updatePeriod} onDelete={deletePeriod} onToggle={togglePeriodDone} onSetQty={setPeriodQty}
               schedule={schedule} checked={checked} missed={missed} onTaskCheck={toggleFull} courses={courses} />
           </div>
         )}
@@ -1802,7 +1858,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
   if (c.type === 'stock' && periods) {
     for (const list of Object.values(periods)) {
       for (const p of list) {
-        if (p.done && p.linkedTaskId === `stock:${c.id}`) stockUsed += (c.stepUnit || 1);
+        if (p.done && p.linkedTaskId === `stock:${c.id}`) stockUsed += (p.qty != null ? p.qty : (c.stepUnit || 1));
       }
     }
   }
@@ -1900,7 +1956,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-                }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
+}function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
@@ -2135,7 +2191,7 @@ function Row({ label, children, req }) {
   );
 }
 
-function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedule, checked, missed, onTaskCheck, courses }) {
+function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, onSetQty, schedule, checked, missed, onTaskCheck, courses }) {
   const [date, setDate] = useState(today);
   const [pickerFor, setPickerFor] = useState(null); // 할당 모달 띄울 교시번호(no)
   const dayPeriods = periods[date] || [];
@@ -2185,7 +2241,7 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
       let used = 0;
       for (const arr of Object.values(periods)) {
         for (const p of arr) {
-          if (p.done && p.linkedTaskId === `stock:${c.id}`) used += (c.stepUnit || 1);
+          if (p.done && p.linkedTaskId === `stock:${c.id}`) used += (p.qty != null ? p.qty : (c.stepUnit || 1));
         }
       }
       const left = Math.max(0, (c.stockTotal || 0) - used);
@@ -2249,7 +2305,16 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
     setPickerFor(null);
   };
   const pickStock = (no, sc) => {
-    onAdd(date, no, { subject: sc.subject, task: `${sc.name} (-${sc.stepUnit||1}${sc.unit||'회'})`, linkedTaskId: `stock:${sc.id}` });
+    // 현재까지 이 비축형을 시간표에 꽂은 항목 수 → 다음 회차
+    let usedCount = 0;
+    for (const arr of Object.values(periods)) {
+      for (const p of arr) {
+        if (p.linkedTaskId === `stock:${sc.id}`) usedCount++;
+      }
+    }
+    const seq = usedCount + 1;
+    // qty 기본값을 stepUnit으로 넣어 추가 즉시 소진에 반영 (사용자가 0.5 등으로 수정 가능)
+    onAdd(date, no, { subject: sc.subject, task: `${sc.name} (${seq}회차)`, linkedTaskId: `stock:${sc.id}`, qty: sc.stepUnit || 1 });
     setPickerFor(null);
   };
 
@@ -2273,7 +2338,7 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-[11px] text-amber-800">
-        💡 한 교시에 <b>여러 개</b> 넣을 수 있어. <b>+ 추가</b>로 직접 입력하거나 <b>할당</b>으로 과제 골라넣기. 연동 과제를 체크하면 캘린더에도 같이 체크돼. <b>자습</b> 칸은 7교시 이후 집 공부용이야.
+        💡 한 교시에 <b>여러 개</b> 넣을 수 있어. <b>+ 직접</b>으로 입력하거나 <b>+ 할당</b>으로 과제 골라넣기. 항목마다 <b>"한 양"</b>에 실제로 한 개수를 적으면 캘린더·비축에 그대로 반영돼 (0.5도 가능). <b>자습</b> 칸은 7교시 이후 집 공부용이야.
       </div>
 
       <div className="space-y-3">
@@ -2303,6 +2368,21 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
                   const hasTask = p.task?.trim();
                   const isLinked = !!p.linkedTaskId;
                   const isStock = isLinked && p.linkedTaskId.startsWith('stock:');
+                  // 기본 수량(미입력시): 연동=target, 비축=stepUnit, 직접=1
+                  let defQty = 1;
+                  if (isStock) {
+                    const sc = (courses||[]).find(c => `stock:${c.id}` === p.linkedTaskId);
+                    defQty = sc ? (sc.stepUnit || 1) : 1;
+                  } else if (isLinked) {
+                    const ltd = p.linkedTaskId.split(':')[1];
+                    const lt = schedule[ltd]?.tasks?.find(t => t.id === p.linkedTaskId);
+                    if (lt) defQty = lt.target;
+                    else { const m = p.task.match(/(\d+)~(\d+)/); defQty = m ? Number(m[2])-Number(m[1])+1 : 1; }
+                  }
+                  const qtyUnit = isStock ? '' : (() => {
+                    const c = (courses||[]).find(c => p.linkedTaskId && p.linkedTaskId.startsWith(c.id+':'));
+                    return c?.unit || '';
+                  })();
                   return (
                     <div key={p.id} className={`rounded-lg border ${p.done?'border-emerald-400 bg-emerald-50/50':hasTask?cfg.bd:'border-stone-200'} p-2`}>
                       <div className="flex items-center gap-2">
@@ -2332,8 +2412,25 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
                           </>
                         )}
                       </div>
+                      {hasTask && (
+                        <div className="mt-1.5 ml-8 flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] text-stone-400">한 양:</span>
+                          <input type="number" min="0" step="0.5" value={p.qty != null ? p.qty : ''}
+                            onChange={e => {
+                              const v = e.target.value;
+                              onSetQty(date, p.id, v === '' ? null : Math.max(0, Number(v)));
+                            }}
+                            placeholder={String(defQty)}
+                            className="w-16 px-2 py-1 bg-white border border-stone-300 rounded-md text-xs text-center tabular-nums" />
+                          <span className="text-[10px] text-stone-500">
+                            {isStock ? `/ 비축 ${defQty}씩` : qtyUnit ? qtyUnit : ''}
+                            {!isStock && isLinked && ` (기본 ${defQty}${qtyUnit})`}
+                          </span>
+                          {p.qty != null && p.qty !== defQty && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">직접 입력함</span>}
+                        </div>
+                      )}
                       {p.done && p.completedAt && (
-                        <div className="mt-1 ml-8 text-[10px] text-emerald-700 font-semibold">✓ {p.completedAt.slice(5).replace('-','/')} 달성{isLinked && !isStock && ' · 캘린더 반영됨'}</div>
+                        <div className="mt-1 ml-8 text-[10px] text-emerald-700 font-semibold">✓ {p.completedAt.slice(5).replace('-','/')} 달성{isLinked && !isStock && ' · 캘린더 반영됨'}{p.qty != null && ` · ${p.qty}${isStock?'개':qtyUnit} 반영`}</div>
                       )}
                     </div>
                   );
@@ -2418,8 +2515,8 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
                           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cfg.ch} flex-shrink-0`}>{sc.subject}</span>
                           <span className="text-xs font-semibold text-stone-800 flex-1 truncate">{sc.name}</span>
                           {lc > 0 && <span className="text-[9px] text-indigo-700 font-bold flex-shrink-0">🔗{lc}</span>}
-                          {soldOut ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-stone-200 text-stone-500 flex-shrink-0">소진</span>
-                            : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 tabular-nums flex-shrink-0">남음 {sc.left}{sc.unit||'회'}</span>}
+                          {soldOut ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-stone-200 text-stone-500 flex-shrink-0">소진 완료</span>
+                            : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 tabular-nums flex-shrink-0">{sc.used}/{sc.stockTotal}{sc.unit||''} 함</span>}
                         </button>
                       );
                     })}
