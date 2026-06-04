@@ -1924,7 +1924,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-            }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
+                                                  }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
