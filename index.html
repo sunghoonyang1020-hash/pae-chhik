@@ -181,10 +181,24 @@ function buildSchedule(courses, holidays, config, checked) {
       
       for (const ds of all) {
         if (ds < startFrom) continue;
-        if (s[ds].isHoliday || s[ds].isMileDay) continue;
-        if (!c.days.includes(dow(ds))) continue;
+        if (s[ds].isHoliday || s[ds].isMileDay) {
+          // 휴일/시험날이라도 그날 당겨푼 게 있으면 진도 반영 (시간표서 당겨풀기)
+          const tidH = `${c.id}:${ds}`;
+          const aH = getVal(checked[tidH]);
+          if (aH > 0 && currentLesson < total) currentLesson = Math.min(currentLesson + aH, total);
+          continue;
+        }
         
+        const isAssignedDay = c.days.includes(dow(ds));
         const tid = `${c.id}:${ds}`;
+        
+        if (!isAssignedDay) {
+          // 배정 요일 아님 → task 안 깔지만, 시간표서 당겨푼 checked가 있으면 진도만 당김
+          const a = getVal(checked[tid]);
+          if (a > 0 && currentLesson < total) currentLesson = Math.min(currentLesson + a, total);
+          continue;
+        }
+        
         const start = currentLesson + 1;
         
         let text, target, isPost = false;
@@ -1886,7 +1900,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-            }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
+                }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
@@ -2187,15 +2201,18 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
       if (c.type === 'stock') continue;
       if (assignedCourseIds.has(c.id)) continue;
       if (c.type === 'lesson') {
-        let lastEnd = c.doneLessons || 0;
-        for (const ds of Object.keys(schedule).sort()) {
-          for (const t of schedule[ds].tasks) {
-            if (t.courseId !== c.id || t.isPostComplete) continue;
-            const m = t.text.match(/(\d+)(?:~(\d+))?[^\d]*$/);
-            if (m) { const end = Number(m[2] || m[1]); if (end > lastEnd) lastEnd = end; }
-          }
+        // 다음 풀 강 = doneLessons + 실제로 푼 누적(checked) + 1
+        // schedule에 깔린 "미래 예정분"은 아직 안 푼 거니까 건너뛰면 안 됨!
+        // 각 checked가 몇 강 분량인지 task text에서 파싱, 없으면 achieved 값으로
+        let pulled = 0;
+        for (const [tid, v] of Object.entries(checked)) {
+          if (!tid.startsWith(`${c.id}:`)) continue;
+          const val = getVal(v);
+          if (val <= 0) continue;
+          pulled += val; // 진도형은 achieved가 "푼 강 수"
         }
-        const start = lastEnd + 1;
+        const doneNow = (c.doneLessons || 0) + pulled;
+        const start = doneNow + 1;
         const total = c.totalLessons || 0;
         if (start > total) continue;
         const per = Math.max(1, c.lessonsPerDay || 1);
