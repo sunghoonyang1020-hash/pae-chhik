@@ -52,7 +52,8 @@
 
 <script>
   window.SUPABASE_URL = "https://ipjoxlkrfwjvyorerjhf.supabase.co";
-  window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwam94bGtyZndqdnlvcmVyamhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDA3MjUsImV4cCI6MjA5MjE3NjcyNX0.fdkM6gWCSZw5oO6JiesNnY9jDqRBGDJ9r2joUR0OJqM";</script>
+  window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwam94bGtyZndqdnlvcmVyamhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDA3MjUsImV4cCI6MjA5MjE3NjcyNX0.fdkM6gWCSZw5oO6JiesNnY9jDqRBGDJ9r2joUR0OJqM";
+</script>
 
 <script type="text/babel" data-type="module">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
@@ -315,6 +316,7 @@ function App() {
   const [quickEdit, setQuickEdit] = useState(null);
   const [expandedPast, setExpandedPast] = useState(false);
   const [popTaskId, setPopTaskId] = useState(null);
+  const pendingEdits = useRef({}); // tmpId -> 최신 입력값 (INSERT 완료 후 반영)
 
   useEffect(() => {
     if (!sb) { setAuthLoading(false); return; }
@@ -612,23 +614,20 @@ function App() {
       if (error) throw error;
       if (data) {
         const realId = data.id;
-        let latest = null;
         setPeriods(prev => ({
           ...prev,
-          [date]: (prev[date] || []).map(p => {
-            if (p.id !== tmpId) return p;
-            latest = { ...p, id: realId };
-            return latest;
-          }),
+          [date]: (prev[date] || []).map(p => p.id === tmpId ? { ...p, id: realId } : p),
         }));
-        // INSERT는 초기값으로 됐는데 그 사이 사용자가 입력했을 수 있음 → 최신 내용으로 한번 더 저장
-        if (latest && (latest.task !== item.task || latest.subject !== item.subject || latest.qty !== item.qty || latest.done !== item.done)) {
+        // INSERT 진행 중 입력된 최신값이 ref에 있으면 그걸로 한번 더 저장
+        const pend = pendingEdits.current[tmpId];
+        if (pend) {
+          delete pendingEdits.current[tmpId];
           try {
             await sb.from('daily_periods').update({
-              subject: latest.subject, task: latest.task,
-              done: latest.done, completed_at: latest.done ? (latest.completedAt || fd(new Date())) : null,
-              linked_task_id: latest.linkedTaskId || null,
-              qty: latest.qty != null ? latest.qty : null,
+              subject: pend.subject, task: pend.task,
+              done: pend.done, completed_at: pend.done ? (pend.completedAt || fd(new Date())) : null,
+              linked_task_id: pend.linkedTaskId || null,
+              qty: pend.qty != null ? pend.qty : null,
             }).eq('id', realId);
           } catch(e) { console.error(e); }
         }
@@ -650,11 +649,15 @@ function App() {
     if (!merged) return;
     if (!sb || !user) return;
 
-    // tmp id면 아직 addPeriod의 INSERT가 진행 중 → 로컬 state만 갱신.
-    // INSERT가 끝나면 addPeriod가 최신 내용으로 마무리 저장하므로 여기선 DB 건드리지 않음.
-    if (String(id).startsWith('tmp-')) return;
+    // tmp id면 아직 INSERT 진행 중 → 최신값 ref에 저장, addPeriod가 마무리
+    if (String(id).startsWith('tmp-')) {
+      pendingEdits.current[id] = {
+        subject: merged.subject, task: merged.task, qty: merged.qty,
+        done: merged.done, linkedTaskId: merged.linkedTaskId, completedAt: merged.completedAt,
+      };
+      return;
+    }
 
-    // 이미 DB에 있는 항목 → UPDATE
     try {
       const completedAt = merged.done ? (merged.completedAt || fd(new Date())) : null;
       await sb.from('daily_periods').update({
@@ -1923,7 +1926,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-                                                  }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
+}function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
@@ -2158,6 +2161,41 @@ function Row({ label, children, req }) {
   );
 }
 
+// 직접입력 칸: 입력 중엔 로컬 state로만 두고, 멈추거나(0.7초) 포커스 떠날 때 저장.
+// → 자모 단위 onChange race를 원천 차단 (DB엔 완성된 값만 들어감)
+function FreeInput({ value, onCommit, autoFocus }) {
+  const [local, setLocal] = useState(value);
+  const timer = useRef(null);
+  const composing = useRef(false);
+
+  // 바깥 value가 바뀌면(다른 곳에서 갱신) 동기화 — 단, 입력 중이 아닐 때만
+  useEffect(() => {
+    if (!composing.current) setLocal(value);
+  }, [value]);
+
+  const commit = (val) => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (val !== value) onCommit(val);
+  };
+
+  const onChange = (e) => {
+    const val = e.target.value;
+    setLocal(val);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => commit(val), 700);
+  };
+
+  return (
+    <input type="text" value={local} autoFocus={autoFocus}
+      onChange={onChange}
+      onCompositionStart={() => { composing.current = true; }}
+      onCompositionEnd={(e) => { composing.current = false; setLocal(e.target.value); }}
+      onBlur={() => commit(local)}
+      placeholder="직접 입력"
+      className="flex-1 min-w-0 px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-md text-xs" />
+  );
+}
+
 function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, onSetQty, schedule, checked, missed, onTaskCheck, courses }) {
   const [date, setDate] = useState(today);
   const [pickerFor, setPickerFor] = useState(null); // 할당 모달 띄울 교시번호(no)
@@ -2305,7 +2343,7 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, onSetQ
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-[11px] text-amber-800">
-        💡 한 교시에 <b>여러 개</b> 넣을 수 있어. <b>+ 직접</b>으로 입력하거나 <b>+ 할당</b>으로 과제 골라넣기. 항목마다 <b>"한 양"</b>에 실제로 한 개수를 적으면 캘린더·비축에 그대로 반영돼 (0.5도 가능). <b>자습</b> 칸은 7교시 이후 집 공부용이야.
+        💡 한 교시에 <b>여러 개</b> 넣을 수 있어. <b>+ 직접</b>으로 입력하거나 <b>+ 할당</b>으로 과제 골라넣기. 직접입력은 글자 다 치고 <b>잠깐 멈추거나 다른 데를 누르면</b> 저장돼. 항목마다 <b>"한 양"</b>에 실제로 한 개수를 적으면 캘린더·비축에 반영돼 (0.5도 가능).
       </div>
 
       <div className="space-y-3">
@@ -2371,10 +2409,8 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, onSetQ
                               className="px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-md text-xs font-bold w-16 flex-shrink-0">
                               {SUB_LIST.map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
-                            <input type="text" value={p.task || ''} autoFocus={!p.task}
-                              onChange={e => onUpdate(date, p.id, { task: e.target.value })}
-                              placeholder="직접 입력"
-                              className="flex-1 min-w-0 px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-md text-xs" />
+                            <FreeInput value={p.task || ''} autoFocus={!p.task}
+                              onCommit={(val) => onUpdate(date, p.id, { task: val })} />
                             <button onClick={() => onDelete(date, p.id)} className="p-1 hover:bg-stone-100 rounded flex-shrink-0"><X className="w-3.5 h-3.5 text-stone-400" /></button>
                           </>
                         )}
