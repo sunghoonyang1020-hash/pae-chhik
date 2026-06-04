@@ -290,7 +290,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [courses, setCourses] = useState([]);
   const [checked, setChecked] = useState({});
-  const [periods, setPeriods] = useState({}); // { 'YYYY-MM-DD': [{ no, subject, task, done, completedAt }] }
+  const [periods, setPeriods] = useState({}); // { 'YYYY-MM-DD': [{ id, no, subject, task, done, completedAt, linkedTaskId }] }
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState('idle');
@@ -572,44 +572,79 @@ function App() {
     await sb.auth.signOut();
   };
 
-  // 시간표 저장 (upsert)
-  const savePeriod = async (date, no, fields) => {
-    const cur = periods[date] || [];
-    const existIdx = cur.findIndex(p => p.no === no);
-    const merged = existIdx >= 0 ? { ...cur[existIdx], ...fields } : { no, subject: '기타', task: '', done: false, linkedTaskId: null, ...fields };
-    
-    const isEmpty = !merged.task?.trim() && !merged.subject;
-    
+  // 시간표: 항목마다 고유 id로 관리 (한 교시에 여러 개 가능)
+  // 새 항목 추가
+  const addPeriod = async (date, no, fields) => {
+    const tmpId = 'tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const item = { id: tmpId, no, subject: '기타', task: '', done: false, linkedTaskId: null, completedAt: null, ...fields };
+    if (!item.task?.trim() && !item.subject) return;
+
     setPeriods(prev => {
-      const newDate = [...(prev[date] || [])];
-      if (existIdx >= 0) {
-        if (isEmpty) newDate.splice(existIdx, 1);
-        else newDate[existIdx] = merged;
-      } else if (!isEmpty) {
-        newDate.push(merged);
-        newDate.sort((a,b) => a.no - b.no);
-      }
+      const newDate = [...(prev[date] || []), item];
+      newDate.sort((a,b) => a.no - b.no);
       return { ...prev, [date]: newDate };
     });
-    
+
     if (!sb || !user) return;
     try {
-      if (isEmpty && merged.id) {
-        await sb.from('daily_periods').delete().eq('id', merged.id);
-      } else if (!isEmpty) {
-        const completedAt = merged.done ? (merged.completedAt || fd(new Date())) : null;
-        await sb.from('daily_periods').upsert({
-          user_id: user.id, period_date: date, period_no: no,
-          subject: merged.subject, task: merged.task,
-          done: merged.done, completed_at: completedAt,
-          linked_task_id: merged.linkedTaskId || null,
-        }, { onConflict: 'user_id,period_date,period_no' });
-      }
+      const completedAt = item.done ? (item.completedAt || fd(new Date())) : null;
+      const { data, error } = await sb.from('daily_periods').insert({
+        user_id: user.id, period_date: date, period_no: no,
+        subject: item.subject, task: item.task,
+        done: item.done, completed_at: completedAt,
+        linked_task_id: item.linkedTaskId || null,
+      }).select().single();
+      if (error) throw error;
+      // 임시 id를 진짜 uuid로 교체
+      if (data) setPeriods(prev => ({
+        ...prev,
+        [date]: (prev[date] || []).map(p => p.id === tmpId ? { ...p, id: data.id } : p),
+      }));
     } catch(e) { console.error(e); }
   };
 
-  const togglePeriodDone = (date, no) => {
-    const cur = (periods[date] || []).find(p => p.no === no);
+  // id로 항목 수정
+  const updatePeriod = async (date, id, fields) => {
+    let merged = null;
+    setPeriods(prev => {
+      const newDate = (prev[date] || []).map(p => {
+        if (p.id !== id) return p;
+        merged = { ...p, ...fields };
+        return merged;
+      });
+      return { ...prev, [date]: newDate };
+    });
+    if (!merged) return;
+
+    // 내용이 통째로 비면 삭제
+    const isEmpty = !merged.task?.trim() && !merged.subject;
+    if (isEmpty) { deletePeriod(date, id); return; }
+
+    if (!sb || !user) return;
+    if (String(id).startsWith('tmp-')) return; // 아직 insert 안 끝난 항목은 스킵
+    try {
+      const completedAt = merged.done ? (merged.completedAt || fd(new Date())) : null;
+      await sb.from('daily_periods').update({
+        subject: merged.subject, task: merged.task,
+        done: merged.done, completed_at: completedAt,
+        linked_task_id: merged.linkedTaskId || null,
+      }).eq('id', id);
+    } catch(e) { console.error(e); }
+  };
+
+  // id로 항목 삭제
+  const deletePeriod = async (date, id) => {
+    setPeriods(prev => ({
+      ...prev,
+      [date]: (prev[date] || []).filter(p => p.id !== id),
+    }));
+    if (!sb || !user) return;
+    if (String(id).startsWith('tmp-')) return;
+    try { await sb.from('daily_periods').delete().eq('id', id); } catch(e) { console.error(e); }
+  };
+
+  const togglePeriodDone = (date, id) => {
+    const cur = (periods[date] || []).find(p => p.id === id);
     if (!cur || !cur.task?.trim()) return;
     const newDone = !cur.done;
     
@@ -621,15 +656,15 @@ function App() {
       if (linked) {
         const curVal = getVal(checked[cur.linkedTaskId]);
         const origDone = curVal >= linked.target;
-        // 같은 과제에 연결된 모든 교시
+        // 같은 과제에 연결된 모든 항목
         const siblings = (periods[date] || []).filter(p => p.linkedTaskId === cur.linkedTaskId);
         
         if (newDone) {
           // 하나라도 체크되면 원본 채우기 (아직 미달성일 때만)
           if (!origDone) toggleFull(linked, td !== date);
         } else {
-          // 이 교시 끄면 → 나머지 형제 교시가 전부 꺼지는지 확인
-          const othersAllOff = siblings.filter(p => p.no !== no).every(p => !p.done);
+          // 이 항목 끄면 → 나머지 형제 항목이 전부 꺼지는지 확인
+          const othersAllOff = siblings.filter(p => p.id !== id).every(p => !p.done);
           if (othersAllOff && origDone) toggleFull(linked, td !== date);
         }
       } else {
@@ -648,7 +683,7 @@ function App() {
       }
     }
     
-    savePeriod(date, no, { done: newDone, completedAt: newDone ? fd(new Date()) : null });
+    updatePeriod(date, id, { done: newDone, completedAt: newDone ? fd(new Date()) : null });
   };
 
   const schedule = useMemo(() => buildSchedule(courses, config.holidays, config, checked), [courses, config, checked]);
@@ -903,7 +938,7 @@ function App() {
 
         {view === 'timetable' && (
           <div className="fade-in">
-            <Timetable today={today} periods={periods} onSave={savePeriod} onToggle={togglePeriodDone}
+            <Timetable today={today} periods={periods} onAdd={addPeriod} onUpdate={updatePeriod} onDelete={deletePeriod} onToggle={togglePeriodDone}
               schedule={schedule} checked={checked} missed={missed} onTaskCheck={toggleFull} courses={courses} />
           </div>
         )}
@@ -1509,7 +1544,7 @@ function DayCard({ ds, schedule, today, checked, periods, missed, showMissed, on
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cfg.ch}`}>{p.subject}</span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{p.no}교시</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{p.no === 8 ? '자습' : `${p.no}교시`}</span>
                   {isStock && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">비축</span>}
                 </div>
                 <div className={`text-sm font-semibold ${p.done?'text-stone-400 line-through':'text-stone-800'}`}>{p.task}</div>
@@ -1560,7 +1595,7 @@ function Task({ t, v, onT, onA, onE, pop, isMissed, od, periodNos }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cfg.ch}`}>{t.subject}</span>
-          {periodNos && periodNos.length > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{periodNos.sort((a,b)=>a-b).join(',')}교시</span>}
+          {periodNos && periodNos.length > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{periodNos.sort((a,b)=>a-b).map(n => n === 8 ? '자습' : `${n}`).join(',')}{periodNos.every(n=>n===8)?'':'교시'}</span>}
           {isMissed && od && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 tabular-nums">{Number(od.slice(5,7))}/{Number(od.slice(8))} 놓침</span>}
           {over && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">🔥 초과 +{v - tgt}</span>}
           {t.isPostComplete && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">완강 후</span>}
@@ -1852,7 +1887,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-  }
+}
 function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
@@ -2088,34 +2123,37 @@ function Row({ label, children, req }) {
   );
 }
 
-function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed, onTaskCheck, courses }) {
+function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedule, checked, missed, onTaskCheck, courses }) {
   const [date, setDate] = useState(today);
-  const [pickerFor, setPickerFor] = useState(null); // 과제 선택 모달 띄울 교시번호
+  const [pickerFor, setPickerFor] = useState(null); // 할당 모달 띄울 교시번호(no)
   const dayPeriods = periods[date] || [];
-  
-  const getPeriod = (no) => dayPeriods.find(p => p.no === no) || { no, subject: '', task: '', done: false, linkedTaskId: null };
-  
-  const periodList = [1,2,3,4,5,6,7];
+
+  // 교시 슬롯: 1~7 + 자습(8)
+  const SLOTS = [
+    { no: 1, label: '1교시' }, { no: 2, label: '2교시' }, { no: 3, label: '3교시' },
+    { no: 4, label: '4교시' }, { no: 5, label: '5교시' }, { no: 6, label: '6교시' },
+    { no: 7, label: '7교시' }, { no: 8, label: '자습' },
+  ];
+
+  // 교시별 항목들 그룹핑
+  const bySlot = (no) => dayPeriods.filter(p => p.no === no);
+
   const filled = dayPeriods.filter(p => p.task?.trim()).length;
-  const doneCount = dayPeriods.filter(p => p.done).length;
+  const doneCount = dayPeriods.filter(p => p.done && p.task?.trim()).length;
   const pct = filled > 0 ? Math.round(doneCount / filled * 100) : 0;
 
-  // 선택 날짜에 할당된 과제 (진도형/분량형/단발형, exam 제외)
+  // 할당 후보들 (선택 날짜 기준)
   const assignedTasks = useMemo(() => {
     const day = schedule[date];
     if (!day) return [];
-    return day.tasks.filter(t => t.courseId !== 'exam').map(t => ({
-      ...t, isMissed: false,
-    }));
+    return day.tasks.filter(t => t.courseId !== 'exam').map(t => ({ ...t, isMissed: false }));
   }, [schedule, date]);
 
-  // 선택 날짜가 오늘일 때만 밀린 과제도 후보로
   const missedTasks = useMemo(() => {
     if (date !== today) return [];
     return (missed || []).map(t => ({ ...t, isMissed: true }));
   }, [missed, date, today]);
 
-  // 비축형 강좌: 전체 소진량 계산해서 남은 게 있는 것만 후보
   const stockCourses = useMemo(() => {
     const list = (courses || []).filter(c => c.type === 'stock');
     return list.map(c => {
@@ -2130,23 +2168,14 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
     });
   }, [courses, periods]);
 
-  // 이미 그날 깔린 강좌 ID
   const assignedCourseIds = useMemo(() => new Set(assignedTasks.map(t => t.courseId)), [assignedTasks]);
 
-  // 그날 안 깔린 강좌도 "추가로 당겨 풀기" 후보로 (진도형/분량형/단발형). 비축형은 따로 처리됨
   const otherCourses = useMemo(() => {
     const out = [];
     for (const c of (courses || [])) {
       if (c.type === 'stock') continue;
-      if (assignedCourseIds.has(c.id)) continue; // 그날 이미 깔린 건 위에 있음
+      if (assignedCourseIds.has(c.id)) continue;
       if (c.type === 'lesson') {
-        // 현재까지 체크된 최대 강수 → 다음 분량 제안
-        let maxDone = c.doneLessons || 0;
-        for (const [tid, v] of Object.entries(checked)) {
-          if (!tid.startsWith(`${c.id}:`)) continue;
-          // 해당 날짜의 그 강좌 target만큼 진행됐다고 보고, 단순히 누적 추정
-        }
-        // 정확한 다음 강 계산: schedule 전체에서 이 강좌의 마지막 배정 분량 찾기
         let lastEnd = c.doneLessons || 0;
         for (const ds of Object.keys(schedule).sort()) {
           for (const t of schedule[ds].tasks) {
@@ -2157,7 +2186,7 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
         }
         const start = lastEnd + 1;
         const total = c.totalLessons || 0;
-        if (start > total) continue; // 이미 다 깔림
+        if (start > total) continue;
         const per = Math.max(1, c.lessonsPerDay || 1);
         const end = Math.min(start + per - 1, total);
         const text = end > start ? `${c.name} ${start}~${end}${c.unit}` : `${c.name} ${start}${c.unit}`;
@@ -2171,36 +2200,28 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
     return out;
   }, [courses, assignedCourseIds, schedule, checked]);
 
-  // 이 과제가 이미 몇 교시에 연결됐는지 (중복 허용하되 표시용)
   const linkCount = (taskId) => dayPeriods.filter(p => p.linkedTaskId === taskId).length;
   const pickList = [...assignedTasks, ...missedTasks];
+  const hasAnyCandidate = pickList.length > 0 || stockCourses.filter(sc=>sc.left>0).length > 0 || otherCourses.length > 0;
 
+  // 직접입력 항목 새로 추가 (빈 칸)
+  const addBlank = (no) => onAdd(date, no, { subject: '기타', task: '' });
+
+  // 할당 모달에서 선택
   const pickTask = (no, task) => {
-    onSave(date, no, { 
-      subject: task.subject, 
+    onAdd(date, no, {
+      subject: task.subject,
       task: task.text + (task.isMissed ? ` (${task.originalDate?.slice(5).replace('-','/')} 밀림)` : ''),
       linkedTaskId: task.id,
     });
     setPickerFor(null);
   };
-
-  // 그날 안 깔린 강좌 당겨풀기: linkedTaskId = courseId:date 로 꽂아서 진도/달성 반영 (체크 시 togglePeriodDone이 처리)
   const pickExtra = (no, ec) => {
-    onSave(date, no, {
-      subject: ec.subject,
-      task: ec.text,
-      linkedTaskId: `${ec.courseId}:${date}`,
-    });
+    onAdd(date, no, { subject: ec.subject, task: ec.text, linkedTaskId: `${ec.courseId}:${date}` });
     setPickerFor(null);
   };
-
-  // 비축형 꺼내기: linkedTaskId = stock:{courseId}, 체크하면 즉시 done 처리
   const pickStock = (no, sc) => {
-    onSave(date, no, {
-      subject: sc.subject,
-      task: `${sc.name} (-${sc.stepUnit||1}${sc.unit||'회'})`,
-      linkedTaskId: `stock:${sc.id}`,
-    });
+    onAdd(date, no, { subject: sc.subject, task: `${sc.name} (-${sc.stepUnit||1}${sc.unit||'회'})`, linkedTaskId: `stock:${sc.id}` });
     setPickerFor(null);
   };
 
@@ -2212,7 +2233,7 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
           <h2 className="text-sm font-bold uppercase tracking-wider">오늘 시간표</h2>
         </div>
         <div className="text-3xl font-black tabular-nums mb-1">{pct}%</div>
-        <div className="text-xs opacity-90 tabular-nums">{doneCount} / {filled}교시 달성 · 채워진 교시 {filled}개</div>
+        <div className="text-xs opacity-90 tabular-nums">{doneCount} / {filled}개 달성 · 채워진 항목 {filled}개</div>
       </div>
 
       <div className="bg-white rounded-xl border border-stone-200 p-3 mb-4 flex items-center gap-2">
@@ -2224,57 +2245,77 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-[11px] text-amber-800">
-        💡 각 교시에 <b>할당 과제 골라넣기</b> 또는 <b>직접 입력</b>. 할당 과제를 골라서 체크하면 캘린더에도 같이 체크돼. 직접 입력한 자유과제는 달성 탭에만 카운트됨.
+        💡 한 교시에 <b>여러 개</b> 넣을 수 있어. <b>+ 추가</b>로 직접 입력하거나 <b>할당</b>으로 과제 골라넣기. 연동 과제를 체크하면 캘린더에도 같이 체크돼. <b>자습</b> 칸은 7교시 이후 집 공부용이야.
       </div>
 
-      <div className="space-y-2">
-        {periodList.map(no => {
-          const p = getPeriod(no);
-          const cfg = p.subject ? getSub(p.subject) : SUBJECTS.기타;
-          const hasTask = p.task?.trim();
-          const isLinked = !!p.linkedTaskId;
+      <div className="space-y-3">
+        {SLOTS.map(slot => {
+          const items = bySlot(slot.no);
+          const isJaseup = slot.no === 8;
           return (
-            <div key={no} className={`bg-white rounded-xl border ${p.done?'border-emerald-400 bg-emerald-50/50':hasTask?cfg.bd:'border-stone-200'} p-3 shadow-sm`}>
-              <div className="flex items-center gap-2">
-                <button onClick={() => onToggle(date, no)} disabled={!hasTask}
-                  className={`flex-shrink-0 w-7 h-7 rounded-md border-2 flex items-center justify-center font-bold text-xs
-                  ${p.done?'bg-emerald-500 border-emerald-500 text-white':hasTask?`bg-white ${cfg.bd.replace('-200','-400')}`:'bg-stone-100 border-stone-200 text-stone-400'}`}>
-                  {p.done ? <Check className="w-4 h-4" /> : no}
-                </button>
-                <span className="text-xs font-bold text-stone-600 w-9 flex-shrink-0">{no}교시</span>
-                {isLinked ? (
-                  <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cfg.ch} flex-shrink-0`}>{p.subject}</span>
-                    <span className="text-xs font-semibold text-stone-800 truncate flex-1">{p.task}</span>
-                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 flex-shrink-0">🔗 연동</span>
-                    <button onClick={() => onSave(date, no, { task:'', subject:'', linkedTaskId:null, done:false })} className="p-1 hover:bg-stone-100 rounded flex-shrink-0"><X className="w-3.5 h-3.5 text-stone-400" /></button>
-                  </div>
-                ) : (
-                  <>
-                    <select value={p.subject || ''} onChange={e => onSave(date, no, { subject: e.target.value })}
-                      className="px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-md text-xs font-bold w-16 flex-shrink-0">
-                      <option value="">과목</option>
-                      {SUB_LIST.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <input type="text" value={p.task || ''} 
-                      onChange={e => onSave(date, no, { task: e.target.value, subject: p.subject || '기타' })}
-                      placeholder="직접 입력"
-                      className="flex-1 min-w-0 px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-md text-xs" />
-                    <button onClick={() => setPickerFor(no)} disabled={pickList.length===0 && stockCourses.filter(sc=>sc.left>0).length===0 && otherCourses.length===0}
-                      className="px-2 py-1.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-md text-[10px] font-bold flex-shrink-0 whitespace-nowrap">
-                      할당+
-                    </button>
-                  </>
-                )}
+            <div key={slot.no} className={`bg-white rounded-xl border ${isJaseup?'border-violet-300':'border-stone-200'} shadow-sm overflow-hidden`}>
+              <div className={`px-3 py-2 flex items-center justify-between ${isJaseup?'bg-violet-50':'bg-stone-50'} border-b ${isJaseup?'border-violet-200':'border-stone-100'}`}>
+                <div className="flex items-center gap-1.5">
+                  {isJaseup && <span className="text-sm">🏠</span>}
+                  <span className={`text-xs font-bold ${isJaseup?'text-violet-700':'text-stone-600'}`}>{slot.label}</span>
+                  {items.length > 0 && <span className="text-[10px] text-stone-400 tabular-nums">· {items.filter(i=>i.done).length}/{items.length}</span>}
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={() => addBlank(slot.no)} className="px-2 py-1 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded-md text-[10px] font-bold">+ 직접</button>
+                  <button onClick={() => setPickerFor(slot.no)} disabled={!hasAnyCandidate}
+                    className="px-2 py-1 bg-indigo-500 hover:bg-indigo-600 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-md text-[10px] font-bold">+ 할당</button>
+                </div>
               </div>
-              {p.done && p.completedAt && (
-                <div className="mt-1.5 ml-9 text-[10px] text-emerald-700 font-semibold">✓ {p.completedAt.slice(5).replace('-','/')} 달성{isLinked && ' · 캘린더 반영됨'}</div>
-              )}
+              <div className="p-2 space-y-1.5">
+                {items.length === 0 && (
+                  <div className="text-center py-3 text-[11px] text-stone-300">아직 없음 · 위 버튼으로 추가</div>
+                )}
+                {items.map(p => {
+                  const cfg = p.subject ? getSub(p.subject) : SUBJECTS.기타;
+                  const hasTask = p.task?.trim();
+                  const isLinked = !!p.linkedTaskId;
+                  const isStock = isLinked && p.linkedTaskId.startsWith('stock:');
+                  return (
+                    <div key={p.id} className={`rounded-lg border ${p.done?'border-emerald-400 bg-emerald-50/50':hasTask?cfg.bd:'border-stone-200'} p-2`}>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => onToggle(date, p.id)} disabled={!hasTask}
+                          className={`flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center font-bold text-xs
+                          ${p.done?'bg-emerald-500 border-emerald-500 text-white':hasTask?`bg-white ${cfg.bd.replace('-200','-400')}`:'bg-stone-100 border-stone-200 text-stone-400'}`}>
+                          {p.done ? <Check className="w-3.5 h-3.5" /> : '·'}
+                        </button>
+                        {isLinked ? (
+                          <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cfg.ch} flex-shrink-0`}>{p.subject}</span>
+                            <span className="text-xs font-semibold text-stone-800 truncate flex-1">{p.task}</span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${isStock?'bg-purple-100 text-purple-700':'bg-indigo-100 text-indigo-700'}`}>{isStock?'비축':'🔗'}</span>
+                            <button onClick={() => onDelete(date, p.id)} className="p-1 hover:bg-stone-100 rounded flex-shrink-0"><X className="w-3.5 h-3.5 text-stone-400" /></button>
+                          </div>
+                        ) : (
+                          <>
+                            <select value={p.subject || '기타'} onChange={e => onUpdate(date, p.id, { subject: e.target.value })}
+                              className="px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-md text-xs font-bold w-16 flex-shrink-0">
+                              {SUB_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <input type="text" value={p.task || ''} autoFocus={!p.task}
+                              onChange={e => onUpdate(date, p.id, { task: e.target.value })}
+                              placeholder="직접 입력"
+                              className="flex-1 min-w-0 px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-md text-xs" />
+                            <button onClick={() => onDelete(date, p.id)} className="p-1 hover:bg-stone-100 rounded flex-shrink-0"><X className="w-3.5 h-3.5 text-stone-400" /></button>
+                          </>
+                        )}
+                      </div>
+                      {p.done && p.completedAt && (
+                        <div className="mt-1 ml-8 text-[10px] text-emerald-700 font-semibold">✓ {p.completedAt.slice(5).replace('-','/')} 달성{isLinked && !isStock && ' · 캘린더 반영됨'}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
       </div>
-      
+
       {filled > 0 && (
         <div className="mt-4 text-center text-xs text-stone-500">
           {pct === 100 ? '🔥 완벽한 하루' : pct >= 50 ? '💪 절반 넘김' : pct > 0 ? '🌱 시작은 했어' : '😴 아직 체크 안 함'}
@@ -2287,8 +2328,8 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
           <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e=>e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b border-stone-200 px-4 py-3 flex items-center justify-between z-10">
               <div>
-                <h3 className="text-base font-bold">{pickerFor}교시에 넣을 과제</h3>
-                <div className="text-[11px] text-stone-500">{date.slice(5).replace('-','/')} 할당분에서 선택</div>
+                <h3 className="text-base font-bold">{pickerFor === 8 ? '자습' : `${pickerFor}교시`}에 넣을 과제</h3>
+                <div className="text-[11px] text-stone-500">{date.slice(5).replace('-','/')} · 골라서 추가 (중복 가능)</div>
               </div>
               <button onClick={() => setPickerFor(null)} className="p-1.5 hover:bg-stone-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
@@ -2307,7 +2348,7 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
                           className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left ${isDone?'bg-emerald-50 border-emerald-200':`${cfg.bg} ${cfg.bd}`} hover:brightness-95`}>
                           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cfg.ch} flex-shrink-0`}>{t.subject}</span>
                           <span className="text-xs font-semibold text-stone-800 flex-1 truncate">{t.text}</span>
-                          {lc > 0 && <span className="text-[9px] text-indigo-700 font-bold flex-shrink-0">🔗{lc}교시</span>}
+                          {lc > 0 && <span className="text-[9px] text-indigo-700 font-bold flex-shrink-0">🔗{lc}</span>}
                           {isDone && <span className="text-[9px] text-emerald-700 font-bold flex-shrink-0">달성</span>}
                         </button>
                       );
@@ -2327,7 +2368,7 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
                           className="w-full flex items-center gap-2 p-2.5 rounded-lg border bg-amber-50 border-amber-200 text-left hover:brightness-95">
                           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cfg.ch} flex-shrink-0`}>{t.subject}</span>
                           <span className="text-xs font-semibold text-stone-800 flex-1 truncate">{t.text}</span>
-                          {lc > 0 && <span className="text-[9px] text-indigo-700 font-bold flex-shrink-0">🔗{lc}교시</span>}
+                          {lc > 0 && <span className="text-[9px] text-indigo-700 font-bold flex-shrink-0">🔗{lc}</span>}
                           {t.originalDate && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 tabular-nums flex-shrink-0">{t.originalDate.slice(5).replace('-','/')} 밀림</span>}
                         </button>
                       );
@@ -2379,10 +2420,10 @@ function Timetable({ today, periods, onSave, onToggle, schedule, checked, missed
                   </div>
                 </div>
               )}
-              {pickList.length === 0 && stockCourses.length === 0 && otherCourses.length === 0 && (
+              {!hasAnyCandidate && (
                 <div className="text-center py-8 text-stone-400">
                   <div className="text-3xl mb-2">🤷</div>
-                  <div className="text-sm">선택할 할당 과제가 없어<br/>직접 입력해 임마</div>
+                  <div className="text-sm">선택할 할당 과제가 없어<br/>+ 직접으로 입력해 임마</div>
                 </div>
               )}
             </div>
