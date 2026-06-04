@@ -982,8 +982,7 @@ function App() {
       {quickEdit && <QuickEdit task={quickEdit} cur={getVal(checked[quickEdit.id])} onSet={v=>setVal(quickEdit.id,v, quickEdit._fromMissed)} onClose={()=>setQuickEdit(null)} />}
     </div>
   );
-}
-function Achievement({ courses, checked, config, today, schedule, periods }) {
+}function Achievement({ courses, checked, config, today, schedule, periods }) {
   const achievements = useMemo(() => {
     const byDate = {};
     const allDates = daysBtw(config.startDate, config.endDate);
@@ -1887,8 +1886,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-}
-function CourseForm({ course, onSave, onClose, holidays, config, today }) {
+            }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
@@ -2149,10 +2147,23 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
     return day.tasks.filter(t => t.courseId !== 'exam').map(t => ({ ...t, isMissed: false }));
   }, [schedule, date]);
 
+  // 선택한 날짜 기준으로 그 이전에 밀린 강의 계산 (진도형만, 미달성)
   const missedTasks = useMemo(() => {
-    if (date !== today) return [];
-    return (missed || []).map(t => ({ ...t, isMissed: true }));
-  }, [missed, date, today]);
+    const out = [];
+    for (const ds of Object.keys(schedule).sort()) {
+      if (ds >= date) break; // 선택 날짜 이전만
+      const d = schedule[ds];
+      if (!d || d.isHoliday) continue;
+      for (const t of d.tasks) {
+        if (!t.carryable) continue;
+        if (t.type === 'quota' || t.type === 'custom') continue;
+        if (t.courseId === 'exam' || t.isPostComplete) continue;
+        const v = getVal(checked[t.id]);
+        if (v < t.target) out.push({ ...t, originalDate: ds, isMissed: true });
+      }
+    }
+    return out;
+  }, [schedule, checked, date]);
 
   const stockCourses = useMemo(() => {
     const list = (courses || []).filter(c => c.type === 'stock');
@@ -2358,7 +2369,7 @@ function Timetable({ today, periods, onAdd, onUpdate, onDelete, onToggle, schedu
               )}
               {missedTasks.length > 0 && (
                 <div>
-                  <div className="text-xs font-bold text-amber-800 mb-2">🔥 밀린 과제</div>
+                  <div className="text-xs font-bold text-amber-800 mb-2">🔥 밀린 강의 ({missedTasks.length}개) · 이 날 전까지 안 푼 거</div>
                   <div className="space-y-1.5">
                     {missedTasks.map(t => {
                       const cfg = getSub(t.subject);
