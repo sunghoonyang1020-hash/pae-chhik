@@ -52,7 +52,7 @@
 
 <script>
   window.SUPABASE_URL = "https://ipjoxlkrfwjvyorerjhf.supabase.co";
-  window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwam94bGtyZndqdnlvcmVyamhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDA3MjUsImV4cCI6MjA5MjE3NjcyNX0.fdkM6gWCSZw5oO6JiesNnY9jDqRBGDJ9r2joUR0OJqM";
+  window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwam94bGtyZndqdnlvcmVyamhmIiwicm9sZSI6ImФub24iLCJpYXQiOjE3NzY2MDA3MjUsImV4cCI6MjA5MjE3NjcyNX0.fdkM6gWCSZw5oO6JiesNnY9jDqRBGDJ9r2joUR0OJqM";
 </script>
 
 <script type="text/babel" data-type="module">
@@ -316,7 +316,6 @@ function App() {
   const [quickEdit, setQuickEdit] = useState(null);
   const [expandedPast, setExpandedPast] = useState(false);
   const [popTaskId, setPopTaskId] = useState(null);
-  const insertingPeriods = useRef(new Set()); // INSERT 진행중인 tmp id (중복 방지)
 
   useEffect(() => {
     if (!sb) { setAuthLoading(false); return; }
@@ -590,7 +589,7 @@ function App() {
   };
 
   // 시간표: 항목마다 고유 id로 관리 (한 교시에 여러 개 가능)
-  // 새 항목 추가
+  // 새 항목 추가 — 빈 칸이든 아니든 추가 즉시 INSERT해서 진짜 id 확보 (race 방지)
   const addPeriod = async (date, no, fields) => {
     const tmpId = 'tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
     const item = { id: tmpId, no, subject: '기타', task: '', done: false, linkedTaskId: null, completedAt: null, qty: null, ...fields };
@@ -601,8 +600,6 @@ function App() {
       return { ...prev, [date]: newDate };
     });
 
-    // task가 비어있으면 DB 저장 보류 (직접입력 빈 칸) → 글자 들어오면 updatePeriod에서 insert
-    if (!item.task?.trim()) return;
     if (!sb || !user) return;
     try {
       const completedAt = item.done ? (item.completedAt || fd(new Date())) : null;
@@ -614,10 +611,29 @@ function App() {
         qty: item.qty != null ? item.qty : null,
       }).select().single();
       if (error) throw error;
-      if (data) setPeriods(prev => ({
-        ...prev,
-        [date]: (prev[date] || []).map(p => p.id === tmpId ? { ...p, id: data.id } : p),
-      }));
+      if (data) {
+        const realId = data.id;
+        let latest = null;
+        setPeriods(prev => ({
+          ...prev,
+          [date]: (prev[date] || []).map(p => {
+            if (p.id !== tmpId) return p;
+            latest = { ...p, id: realId };
+            return latest;
+          }),
+        }));
+        // INSERT는 초기값으로 됐는데 그 사이 사용자가 입력했을 수 있음 → 최신 내용으로 한번 더 저장
+        if (latest && (latest.task !== item.task || latest.subject !== item.subject || latest.qty !== item.qty || latest.done !== item.done)) {
+          try {
+            await sb.from('daily_periods').update({
+              subject: latest.subject, task: latest.task,
+              done: latest.done, completed_at: latest.done ? (latest.completedAt || fd(new Date())) : null,
+              linked_task_id: latest.linkedTaskId || null,
+              qty: latest.qty != null ? latest.qty : null,
+            }).eq('id', realId);
+          } catch(e) { console.error(e); }
+        }
+      }
     } catch(e) { console.error(e); }
   };
 
@@ -633,58 +649,11 @@ function App() {
       return { ...prev, [date]: newDate };
     });
     if (!merged) return;
-
-    // 내용이 통째로 비면 삭제 (DB에 있던 거면 지움, tmp면 그냥 로컬에서)
-    const isEmpty = !merged.task?.trim();
-    if (isEmpty) {
-      if (!String(id).startsWith('tmp-')) deletePeriod(date, id);
-      else setPeriods(prev => ({ ...prev, [date]: (prev[date]||[]).filter(p => p.id !== id) }));
-      return;
-    }
-
     if (!sb || !user) return;
 
-    if (String(id).startsWith('tmp-')) {
-      // 아직 DB에 없는 항목(직접입력 빈 칸에서 시작) → 내용 생겼으니 지금 INSERT
-      if (insertingPeriods.current.has(id)) return; // 이미 INSERT 진행중이면 스킵 (중복 방지)
-      insertingPeriods.current.add(id);
-      try {
-        const completedAt = merged.done ? (merged.completedAt || fd(new Date())) : null;
-        const { data, error } = await sb.from('daily_periods').insert({
-          user_id: user.id, period_date: date, period_no: merged.no,
-          subject: merged.subject, task: merged.task,
-          done: merged.done, completed_at: completedAt,
-          linked_task_id: merged.linkedTaskId || null,
-          qty: merged.qty != null ? merged.qty : null,
-        }).select().single();
-        if (error) throw error;
-        if (data) {
-          const realId = data.id;
-          // 그 사이 더 입력됐을 수 있으니 최신 상태로 id 교체 후, 최신 내용 한번 더 저장
-          let latest = null;
-          setPeriods(prev => {
-            const arr = (prev[date] || []).map(p => {
-              if (p.id !== id) return p;
-              latest = { ...p, id: realId };
-              return latest;
-            });
-            return { ...prev, [date]: arr };
-          });
-          if (latest && (latest.task !== merged.task || latest.subject !== merged.subject)) {
-            try {
-              await sb.from('daily_periods').update({
-                subject: latest.subject, task: latest.task,
-                done: latest.done, completed_at: latest.done ? (latest.completedAt || fd(new Date())) : null,
-                linked_task_id: latest.linkedTaskId || null,
-                qty: latest.qty != null ? latest.qty : null,
-              }).eq('id', realId);
-            } catch(e) { console.error(e); }
-          }
-        }
-      } catch(e) { console.error(e); }
-      finally { insertingPeriods.current.delete(id); }
-      return;
-    }
+    // tmp id면 아직 addPeriod의 INSERT가 진행 중 → 로컬 state만 갱신.
+    // INSERT가 끝나면 addPeriod가 최신 내용으로 마무리 저장하므로 여기선 DB 건드리지 않음.
+    if (String(id).startsWith('tmp-')) return;
 
     // 이미 DB에 있는 항목 → UPDATE
     try {
@@ -726,7 +695,6 @@ function App() {
       }
       return 1;
     };
-    // overrides: { id, done, qty } — 아직 state 반영 전 값으로 계산
     const list = (periods[date] || []).map(p => {
       if (overrides && p.id === overrides.id) return { ...p, ...overrides };
       return p;
@@ -1956,7 +1924,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-}function CourseForm({ course, onSave, onClose, holidays, config, today }) {
+            }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
