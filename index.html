@@ -614,20 +614,26 @@ function App() {
       if (error) throw error;
       if (data) {
         const realId = data.id;
+        delete pendingEdits.current[tmpId];
+        // tmp id를 진짜 id로 교체
         setPeriods(prev => ({
           ...prev,
           [date]: (prev[date] || []).map(p => p.id === tmpId ? { ...p, id: realId } : p),
         }));
-        // INSERT 진행 중 입력된 최신값이 ref에 있으면 그걸로 한번 더 저장
-        const pend = pendingEdits.current[tmpId];
-        if (pend) {
-          delete pendingEdits.current[tmpId];
+        // 한 틱 뒤, state에서 진짜 최신 항목을 읽어 무조건 UPDATE (subject/task/qty 전부 반영)
+        await new Promise(r => setTimeout(r, 0));
+        let latest = null;
+        setPeriods(prev => {
+          latest = (prev[date] || []).find(p => p.id === realId) || null;
+          return prev;
+        });
+        if (latest) {
           try {
             await sb.from('daily_periods').update({
-              subject: pend.subject, task: pend.task,
-              done: pend.done, completed_at: pend.done ? (pend.completedAt || fd(new Date())) : null,
-              linked_task_id: pend.linkedTaskId || null,
-              qty: pend.qty != null ? pend.qty : null,
+              subject: latest.subject, task: latest.task,
+              done: latest.done, completed_at: latest.done ? (latest.completedAt || fd(new Date())) : null,
+              linked_task_id: latest.linkedTaskId || null,
+              qty: latest.qty != null ? latest.qty : null,
             }).eq('id', realId);
           } catch(e) { console.error(e); }
         }
@@ -1926,7 +1932,7 @@ function CCard({ c, h, cfg, td, activeExamDate, periods, onE, onD }) {
       </div>
     </div>
   );
-}function CourseForm({ course, onSave, onClose, holidays, config, today }) {
+    }function CourseForm({ course, onSave, onClose, holidays, config, today }) {
   const [f, setF] = useState({ ...course, customDates: course.customDates || [], lessonsPerDay: course.lessonsPerDay || 1 });
   const up = (p) => setF(v => ({...v, ...p}));
   const tD = (d) => { const ds = f.days.includes(d)?f.days.filter(x=>x!==d):[...f.days,d].sort(); up({days:ds}); };
